@@ -8,7 +8,7 @@ This repository uses a monorepo-like structure with the library source in `src/`
 
 ### 1. Setup
 
-Clone the repository and install dependencies in the root:
+Clone the repository and install dependencies in the root using **yarn**:
 
 ```bash
 yarn install
@@ -28,20 +28,24 @@ This will watch your `src/` files and rebuild them into `lib/` whenever they cha
 ```bash
 cd example
 yarn install
-npx expo start
+yarn start
 ```
 
-### 3. Code Style
+### 3. Professional Standards & Best Practices
 
-- Use TypeScript for all new code.
-- Ensure all React Native Skia code follows the performance best practices (using Shared Values and Reanimated).
-- Keep components focused and modular.
+We maintain a high bar for code quality. Please adhere to the following:
+
+- **Strictly use yarn**: Never commit a `package-lock.json`.
+- **Performance First**: All rendering logic MUST be optimized for Skia and Reanimated. No `setState` for animations.
+- **Type Safety**: No `any` types. Everything must be strictly typed.
+- **AI-Ready**: If you use an AI agent to help you code, ensure it has read `PROJECT_CONTEXT.md` and the guides in `docs/architecture/`.
 
 ## Submitting Changes
 
-1. Create a new branch for your feature or bugfix.
+1. Create a new branch: `feat/` or `fix/`.
 2. Ensure your changes are tested in the `example` app.
-3. Submit a Pull Request with a clear description of the changes.
+3. Update the documentation if you added a new feature.
+4. Submit a Pull Request.
 
 ## License
 

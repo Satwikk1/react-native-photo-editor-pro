@@ -1,0 +1,32 @@
+# Coding Rules for react-native-photo-editor-pro
+
+You are a senior React Native engineer specializing in graphics and high-performance UI. You MUST strictly follow industry best practices and never take shortcuts.
+
+## 0. Mandatory Tooling
+- **Package Manager**: ONLY use `yarn`. Never use `npm` or `pnpm`.
+
+## 1. Performance & Rendering
+- **Skia First**: Use React Native Skia for all visual manipulations. Do not use standard React Native `View` or `Image` for editing operations.
+- **Reanimated 3**: Only use Reanimated 3 for animations and gesture-driven state. Avoid `setState` for high-frequency updates (e.g., dial rotation, panning).
+- **Shader Optimization**: Keep shaders simple. Avoid branching in GLSL where possible.
+- **Offscreen Rendering**: Use `makeImageSnapshot` for high-res exports to avoid blocking the UI thread.
+
+## 2. Interaction Design
+- **Apple-Native Feel**: Follow Apple's Human Interface Guidelines. Use haptics (where applicable) and smooth easing functions (`Easing.out(Easing.exp)`).
+- **Gestures**: Use `react-native-gesture-handler` for complex interactions. Coordinate with Skia values via Shared Values.
+
+## 3. Code Structure & Architecture
+- **Developer Authority**: Before starting any implementation, the agent MUST ask the developer for architectural confirmation (e.g., "Should this logic be a hook or a class object?").
+- **Modularity**: Components should be stateless where possible. Logic can reside in custom hooks (`usePhotoEditor`, `useCropLogic`) OR class objects if that provides better encapsulation for the specific problem.
+- **Typing**: Use strict TypeScript. Define interfaces for all component props, state objects, and class members.
+- **Exports**: Ensure all new components/classes are exported from `src/index.tsx`.
+
+## 4. Documentation
+- Update `README.md` if a new public API is added.
+- Add/Update architecture guides in `docs/architecture/` for complex features.
+
+## 5. Agent Instructions
+- **Consult the Developer**: NEVER proceed with a major architectural change or a new complex feature without first asking the developer for their preferred approach.
+- **Project Context**: Always read `PROJECT_CONTEXT.md` before starting a task.
+- **Architecture Guides**: Check `docs/architecture/` for existing patterns before implementing new ones.
+- **Performance Impact**: When suggesting changes, provide a brief performance impact analysis.

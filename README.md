@@ -12,7 +12,7 @@ A professional-grade, high-performance photo editor for React Native, powered by
 ## Installation
 
 ```sh
-npm install react-native-photo-editor-pro
+yarn add react-native-photo-editor-pro
 ```
 
 ### Peer Dependencies
@@ -56,9 +56,11 @@ To work on the library and see changes in real-time within the `example` app:
    npx expo start
    ```
 
-## Contributing
+## Documentation
 
-See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
+- **[Architecture Guide](docs/architecture/01-rendering-pipeline.md)**: Deep dive into the rendering engine and gesture logic.
+- **[AI Agent Guidance](docs/AGENT_SKILLS.md)**: Standards and best practices for AI contributors.
+- **[Contributing](CONTRIBUTING.md)**: How to set up the environment and submit PRs.
 
 ## License
 
