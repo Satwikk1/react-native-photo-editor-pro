@@ -6,20 +6,21 @@ const workspaceRoot = path.resolve(projectRoot, '..');
 
 const config = getDefaultConfig(projectRoot);
 
-// Tell Metro to watch the parent directory so it can see your source files
+// 1. Watch all files within the monorepo
 config.watchFolders = [workspaceRoot];
 
-// Tell Metro to resolve node_modules starting from the example app
+// 2. Let Metro know where to resolve packages and in what order
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// Explicitly tell Metro where to find the library and enforce correct React versions
+// 3. Force Metro to resolve (sub)dependencies only from the `nodeModulesPaths`
+config.resolver.disableHierarchicalLookup = true;
+
+// 4. Manually alias the library to the parent directory
 config.resolver.extraNodeModules = {
   'react-native-photo-editor-pro': workspaceRoot,
-  'react': path.resolve(projectRoot, 'node_modules/react'),
-  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
 };
 
 module.exports = config;

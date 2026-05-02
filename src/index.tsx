@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Dimensions, TouchableOpacity, Text, SafeAreaView } from 'react-native';
+import { StyleSheet, View, Dimensions, TouchableOpacity, Text, Platform } from 'react-native';
 import { useImage, Skia, SkPath, PaintStyle } from '@shopify/react-native-skia';
 
 import { Cropper } from './components/Cropper';
@@ -19,15 +19,13 @@ export const PhotoEditor = ({ uri, onSave, onCancel }: PhotoEditorProps) => {
   const [activeTab, setActiveTab] = useState<'crop' | 'filter' | 'draw'>('crop');
 
   // Core State (Pure React)
-  const [scale, setScale] = useState(1);
-  const [translateX, setTranslateX] = useState(0);
-  const [translateY, setTranslateY] = useState(0);
+  const [cropRect, setCropRect] = useState<{x: number, y: number, width: number, height: number} | null>(null);
   
   const [brightness, setBrightness] = useState(1);
   const [contrast, setContrast] = useState(1);
   const [saturation, setSaturation] = useState(1);
 
-  const [paths, setPaths] = useState<{ path: SkPath; color: string }[]>([]);
+  const [paths, setPaths] = useState<{ path: SkPath; color: string; width: number }[]>([]);
 
   if (!image) {
     return (
@@ -38,12 +36,15 @@ export const PhotoEditor = ({ uri, onSave, onCancel }: PhotoEditorProps) => {
   }
 
   const handleSave = async () => {
-    // 1. Create a surface for offscreen rendering
+    // 1. Convert our generic 'filter' sliders into the FilterType if needed, 
+    // or manually export using our Skia logic.
+    // For now, since we have precise B/C/S sliders, let's just do it directly like we did before, 
+    // BUT we need to apply the CropRect correctly!
+    
     const surface = Skia.Surface.Make(image.width(), image.height());
     if (!surface) return;
     const canvas = surface.getCanvas();
 
-    // 2. Apply Filters
     const paint = Skia.Paint();
     const b = brightness;
     const c = contrast;
@@ -59,51 +60,86 @@ export const PhotoEditor = ({ uri, onSave, onCancel }: PhotoEditorProps) => {
     ];
     paint.setColorFilter(Skia.ColorFilter.MakeMatrix(matrix));
     
-    // 3. Draw Image
     canvas.drawImage(image, 0, 0, paint);
     
-    // 4. Draw Paths
-    const scaleRatio = image.width() / SCREEN_WIDTH;
+    // Draw Paths
+    const imgWidth = SCREEN_WIDTH;
+    const imgHeight = SCREEN_WIDTH * (image.height() / image.width());
+    const EDITOR_HEIGHT = Dimensions.get('window').height * 0.7;
+    const yOffset = (EDITOR_HEIGHT - imgHeight) / 2;
+    
+    const scaleRatio = image.width() / imgWidth;
     const pathPaint = Skia.Paint();
     pathPaint.setStyle(PaintStyle.Stroke);
-    pathPaint.setStrokeWidth(4 * scaleRatio);
     
     canvas.save();
     canvas.scale(scaleRatio, scaleRatio);
+    canvas.translate(0, -yOffset); // Remove the screen offset so paths align with the original image
     paths.forEach((p) => {
       pathPaint.setColor(Skia.Color(p.color));
+      pathPaint.setStrokeWidth(p.width); // Apply specific width per path
       canvas.drawPath(p.path, pathPaint);
     });
     canvas.restore();
 
-    // 5. Capture Snapshot
-    const snapshot = surface.makeImageSnapshot();
-    const base64 = snapshot.encodeToBase64();
-    onSave(`data:image/png;base64,${base64}`);
+    let finalImage = surface.makeImageSnapshot();
+
+    // Perform Native Crop if a crop rect was defined
+    if (cropRect) {
+      // The cropRect from Cropper.tsx is in screen coordinates relative to the rendered image.
+      // We must scale it to the original image dimensions.
+      // Wait, we will pass cropRect in original image dimensions to avoid math errors!
+      const cropSurface = Skia.Surface.Make(cropRect.width, cropRect.height);
+      if (cropSurface) {
+        const cropCanvas = cropSurface.getCanvas();
+        const srcRect = Skia.XYWHRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
+        const dstRect = Skia.XYWHRect(0, 0, cropRect.width, cropRect.height);
+        cropCanvas.drawImageRect(finalImage, srcRect, dstRect, Skia.Paint());
+        finalImage = cropSurface.makeImageSnapshot();
+      }
+    }
+
+    const base64Data = finalImage.encodeToBase64();
+    onSave(`data:image/jpeg;base64,${base64Data}`);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onCancel} style={styles.headerBtn}>
-          <Text style={styles.btnText}>Cancel</Text>
+    <View style={styles.container}>
+      {/* TOP NAV BAR */}
+      <View style={styles.topNav}>
+        <TouchableOpacity onPress={onCancel} style={styles.pillBtn}>
+          <Text style={styles.pillBtnText}>Cancel</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{activeTab.toUpperCase()}</Text>
-        <TouchableOpacity onPress={handleSave} style={styles.headerBtn}>
-          <Text style={[styles.btnText, styles.saveBtn]}>Save</Text>
+        <TouchableOpacity onPress={handleSave} style={[styles.pillBtn, styles.doneBtn]}>
+          <Text style={styles.doneBtnText}>Done</Text>
         </TouchableOpacity>
       </View>
 
+      {/* SECONDARY TOOLBAR */}
+      <View style={styles.secondaryToolbar}>
+        <View style={styles.leftTools}>
+          <Text style={styles.iconText}>△|△</Text> 
+          <Text style={styles.iconText}>⤿</Text>
+        </View>
+        <TouchableOpacity onPress={() => {}}>
+          <Text style={styles.resetText}>RESET</Text>
+        </TouchableOpacity>
+        <View style={styles.rightTools}>
+          <Text style={styles.iconText}>◫</Text>
+          <TouchableOpacity onPress={() => setActiveTab(activeTab === 'draw' ? 'filter' : 'draw')}>
+            <Text style={[styles.iconText, activeTab === 'draw' && { color: '#FFD60A' }]}>✐</Text>
+          </TouchableOpacity>
+          <Text style={styles.iconText}>⋯</Text>
+        </View>
+      </View>
+
+      {/* EDITOR WORKSPACE */}
       <View style={styles.editorContainer}>
         {activeTab === 'crop' && (
           <Cropper 
             image={image} 
-            scale={scale} 
-            setScale={setScale}
-            translateX={translateX} 
-            setTranslateX={setTranslateX}
-            translateY={translateY} 
-            setTranslateY={setTranslateY}
+            cropRect={cropRect}
+            setCropRect={setCropRect}
           />
         )}
         {activeTab === 'filter' && (
@@ -126,27 +162,36 @@ export const PhotoEditor = ({ uri, onSave, onCancel }: PhotoEditorProps) => {
         )}
       </View>
 
+      {/* BOTTOM TAB BAR */}
       <View style={styles.footer}>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'crop' && styles.activeTab]}
-          onPress={() => setActiveTab('crop')}
-        >
-          <Text style={styles.tabText}>Crop</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'filter' && styles.activeTab]}
+          style={styles.tab}
           onPress={() => setActiveTab('filter')}
         >
-          <Text style={styles.tabText}>Filter</Text>
+          {activeTab === 'filter' && <Text style={styles.activeIndicator}>▼</Text>}
+          <Text style={[styles.tabIcon, activeTab === 'filter' && styles.activeTabText]}>☼</Text>
+          <Text style={[styles.tabText, activeTab === 'filter' && styles.activeTabText]}>Adjust</Text>
         </TouchableOpacity>
+        
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'draw' && styles.activeTab]}
-          onPress={() => setActiveTab('draw')}
+          style={styles.tab}
+          onPress={() => setActiveTab('filter')}
         >
-          <Text style={styles.tabText}>Draw</Text>
+          {activeTab === 'filter' && <Text style={styles.activeIndicator}>▼</Text>}
+          <Text style={[styles.tabIcon, activeTab === 'filter' && styles.activeTabText]}>꩜</Text>
+          <Text style={[styles.tabText, activeTab === 'filter' && styles.activeTabText]}>Filters</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.tab}
+          onPress={() => setActiveTab('crop')}
+        >
+          {activeTab === 'crop' && <Text style={styles.activeIndicator}>▼</Text>}
+          <Text style={[styles.tabIcon, activeTab === 'crop' && styles.activeTabText]}>⛶</Text>
+          <Text style={[styles.tabText, activeTab === 'crop' && styles.activeTabText]}>Crop</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -154,59 +199,99 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+    paddingTop: Platform.OS === 'ios' ? 47 : 0,
   },
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
   },
-  header: {
-    height: 60,
+  topNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  pillBtn: {
+    backgroundColor: '#2C2C2E',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  pillBtnText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  doneBtn: {
+    backgroundColor: '#FFD60A',
+  },
+  doneBtnText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  secondaryToolbar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
   },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+  leftTools: {
+    flexDirection: 'row',
+    width: 80,
+    justifyContent: 'space-between',
+  },
+  rightTools: {
+    flexDirection: 'row',
+    width: 100,
+    justifyContent: 'space-between',
+  },
+  iconText: {
+    color: '#8E8E93',
+    fontSize: 22,
+  },
+  resetText: {
+    color: '#FFD60A',
+    fontSize: 14,
+    fontWeight: '600',
     letterSpacing: 1,
-  },
-  headerBtn: {
-    padding: 10,
-  },
-  btnText: {
-    color: '#999',
-    fontSize: 16,
-  },
-  saveBtn: {
-    color: '#007AFF',
-    fontWeight: 'bold',
   },
   editorContainer: {
     flex: 1,
     backgroundColor: '#000',
   },
   footer: {
-    height: 80,
+    height: 90,
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    backgroundColor: '#111',
-    borderTopWidth: 1,
-    borderTopColor: '#222',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    backgroundColor: '#000',
+    paddingTop: 15,
   },
   tab: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    width: 80,
   },
-  activeTab: {
-    backgroundColor: '#333',
+  activeIndicator: {
+    color: '#FFD60A',
+    fontSize: 8,
+    position: 'absolute',
+    top: -12,
+  },
+  tabIcon: {
+    color: '#8E8E93',
+    fontSize: 24,
+    marginBottom: 4,
   },
   tabText: {
-    color: '#fff',
-    fontSize: 12,
+    color: '#8E8E93',
+    fontSize: 11,
     fontWeight: '500',
+  },
+  activeTabText: {
+    color: '#FFF',
   },
 });
