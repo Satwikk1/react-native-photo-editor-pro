@@ -17,6 +17,9 @@ export function useAdjustmentFilters(stateManager: EditorStateManager) {
     vibrance, shadows, highlights, brilliance,
     vignette, sharpness, definition, noiseReduction,
     rotation, flipX,
+    autoIntensity,
+    autoExposureTarget, autoContrastTarget,
+    autoWarmthTarget,   autoSaturationTarget,
   } = stateManager;
 
   // ─── Canvas dimensions ───────────────────────────────────────────────────
@@ -42,15 +45,26 @@ export function useAdjustmentFilters(stateManager: EditorStateManager) {
   // Everything here maps cleanly to a 4×5 affine transform over RGB.
 
   const colorMatrix = useDerivedValue(() => {
-    // Exposure: power-of-2 multiplier so +100 = 2× brightness, −100 = 0.5×.
-    const exp = Math.pow(2, exposure.value - 1);
+    // Auto-enhance blend: V_final = V_manual + (V_target − V_neutral) × intensity.
+    // Intensity=0 → pure manual values. Intensity=1 → full auto targets.
+    // Only exposure, contrast, warmth, and saturation are analysed; the rest
+    // come from manual sliders unchanged.
+    const ai = autoIntensity.value;
+    const exposureBlended   = exposure.value   + (autoExposureTarget.value   - 1.0) * ai;
+    const contrastBlended   = contrast.value   + (autoContrastTarget.value   - 1.0) * ai;
+    const saturationBlended = saturation.value + (autoSaturationTarget.value - 1.0) * ai;
+    // warmth target is already in the val/500 scale (−0.2…0.2), neutral = 0.
+    const warmthBlended     = warmth.value     + autoWarmthTarget.value             * ai;
 
-    const c   = contrast.value;        // 1.0 = neutral
-    const b   = brightness.value - 1;  // 0.0 = neutral
-    const s   = saturation.value;      // 1.0 = neutral
-    const w   = warmth.value;          // 0.0 = neutral
-    const tnt = tint.value;            // 0.0 = neutral
-    const bp  = blackPoint.value;      // 0.0 = neutral
+    // Exposure: power-of-2 multiplier so +100 = 2× brightness, −100 = 0.5×.
+    const exp = Math.pow(2, exposureBlended - 1);
+
+    const c   = contrastBlended;       // 1.0 = neutral
+    const b   = brightness.value - 1;  // 0.0 = neutral (not auto-adjusted)
+    const s   = saturationBlended;     // 1.0 = neutral
+    const w   = warmthBlended;         // 0.0 = neutral
+    const tnt = tint.value;            // 0.0 = neutral (not auto-adjusted)
+    const bp  = blackPoint.value;      // 0.0 = neutral (not auto-adjusted)
 
     // Saturation desaturation mix coefficients.
     const t  = 1.0 - s;

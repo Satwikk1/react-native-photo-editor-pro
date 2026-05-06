@@ -4,6 +4,7 @@ import type { IconName } from "../SkiaIcon";
 // ─── Tool enum ────────────────────────────────────────────────────────────────
 
 export enum AdjustTool {
+  AUTO            = "AUTO",
   EXPOSURE        = "EXPOSURE",
   BRILLIANCE      = "BRILLIANCE",
   HIGHLIGHTS      = "HIGHLIGHTS",
@@ -31,6 +32,7 @@ export interface ToolMeta {
 }
 
 export const ADJUST_TOOLS: ToolMeta[] = [
+  { id: AdjustTool.AUTO,            name: "AUTO",            icon: "AUTO",            range: [0,    100] },
   { id: AdjustTool.EXPOSURE,        name: "EXPOSURE",        icon: "EXPOSURE",        range: [-100, 100] },
   { id: AdjustTool.BRILLIANCE,      name: "BRILLIANCE",      icon: "BRILLIANCE",      range: [-100, 100] },
   { id: AdjustTool.HIGHLIGHTS,      name: "HIGHLIGHTS",      icon: "HIGHLIGHTS",      range: [-100, 100] },
@@ -62,6 +64,8 @@ export interface ToolStateConfig {
 }
 
 export const TOOL_STATE_CONFIG: Record<AdjustTool, ToolStateConfig> = {
+  // AUTO controls blend intensity; the targets are set separately via applyAutoTargets().
+  [AdjustTool.AUTO]:            { rawKey: "autoIntensityRaw",   procKey: "autoIntensity",   normalize: v => v / 100     },
   [AdjustTool.EXPOSURE]:        { rawKey: "exposureRaw",        procKey: "exposure",        normalize: v => 1 + v / 100 },
   [AdjustTool.BRILLIANCE]:      { rawKey: "brillianceRaw",      procKey: "brilliance",      normalize: v => v / 100     },
   [AdjustTool.HIGHLIGHTS]:      { rawKey: "highlightsRaw",      procKey: "highlights",      normalize: v => v / 100     },
@@ -125,10 +129,11 @@ const MASTER_SKSL = `
     ) / 4.0;
     c.rgb += (c.rgb - blurredDef.rgb) * definition * 2.0;
 
-    // 4. Brilliance — parabolic midtone lift (peaks at luma=0.5, zero at 0 and 1).
+    // 4. Brilliance — quadratic lift: f(x) = x + B·x·(1−x), preserves blacks and
+    //    whites while lifting midtones. Small contrast re-application adds micro-contrast.
     float luma = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float brillianceFactor = brilliance * (1.0 - pow(luma * 2.0 - 1.0, 2.0));
-    c.rgb += brillianceFactor * (c.rgb * 0.5);
+    c.rgb = c.rgb + brilliance * c.rgb * (1.0 - c.rgb);
+    c.rgb = (c.rgb - 0.5) * (1.0 + brilliance * 0.1) + 0.5;
 
     // Recompute luma after brilliance so highlight/shadow masks are accurate.
     luma = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -141,12 +146,17 @@ const MASTER_SKSL = `
     float sMask = 1.0 - smoothstep(0.1, 0.6, luma);
     c.rgb *= (1.0 + shadows * sMask);
 
-    // 7. Vibrance — preferentially boosts unsaturated colours.
+    // 7. Vibrance — preferentially boosts unsaturated colours with skin-tone protection.
+    //    Skin tones (warm hue, moderate red dominance) get a 70% vibrance reduction
+    //    so portraits don't turn orange at high vibrance values.
     float maxC  = max(c.r, max(c.g, c.b));
     float minC  = min(c.r, min(c.g, c.b));
     float sat   = maxC - minC;
     float luma2 = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-    c.rgb = mix(vec3(luma2), c.rgb, 1.0 + vibrance * (1.0 - sat));
+    float isSkin = smoothstep(0.1, 0.4, c.r / (c.g + 0.001))
+                 * (1.0 - smoothstep(0.4, 0.6, c.g / (c.r + 0.001)));
+    float vibranceMult = 1.0 + vibrance * (1.0 - sat) * (1.0 - isSkin * 0.7);
+    c.rgb = mix(vec3(luma2), c.rgb, vibranceMult);
 
     // 8. Vignette — bidirectional radial mask applied last so it is unaffected
     //    by the colour ops above. Positive → darken edges, negative → lighten.

@@ -1,62 +1,90 @@
-import React from 'react';
+import React from "react";
 import { Canvas, Path, Group } from "@shopify/react-native-skia";
 
+// Each icon is a single SVG path designed to have a *distinct silhouette*
+// in its render mode — no shared "outer-circle frame" so they don't all
+// collapse into the same blob at small sizes.
+
 export const ICON_PATHS = {
-  // Exposure: Circle with +/- 
-  EXPOSURE: "M12 2a10 10 0 100 20 10 10 0 000-20z M8 12h8 M12 8v8",
-  
-  // Brilliance: Sun with a dot in middle
-  BRILLIANCE: "M12 12m-3 0a3 3 0 106 0 3 3 0 00-6 0 M12 2v2 M12 20v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M2 12h2 M20 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42",
-  
-  // Highlights: Upper half circle
-  HIGHLIGHTS: "M12 22a10 10 0 100-20 10 10 0 000 20z M21.5 12A9.5 9.5 0 0012 2.5V12h9.5z",
-  
-  // Shadows: Lower half circle
-  SHADOWS: "M12 22a10 10 0 100-20 10 10 0 000 20z M2.5 12A9.5 9.5 0 0012 21.5V12H2.5z",
-  
-  // Contrast: Half filled circle
-  CONTRAST: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M12 18V6a6 6 0 010 12z",
-  
-  // Brightness: Classic sun
-  BRIGHTNESS: "M12 12m-4 0a4 4 0 108 0 4 4 0 00-8 0 M12 2v3 M12 19v3 M4.22 4.22l2.12 2.12 M17.66 17.66l2.12 2.12 M2 12h3 M19 12h3 M4.22 19.78l2.12-2.12 M17.66 6.34l2.12-2.12",
-  
-  // Black Point: Solid inner circle
-  BLACK_POINT: "M12 22a10 10 0 100-20 10 10 0 000 20z M12 12m-5 0a5 5 0 1010 0 5 5 0 00-10 0",
-  
-  // Saturation: Concentric circles
-  SATURATION: "M12 22a10 10 0 100-20 10 10 0 000 20z M12 12m-7 0a7 7 0 1014 0 7 7 0 00-14 0 M12 12m-3 0a3 3 0 106 0 3 3 0 00-6 0",
-  
-  // Vibrance: Droplet
+  // Auto — 5-point star (filled).
+  AUTO: "M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6L12 2z",
+
+  // Exposure — adjustable square aperture (stroked diamond + center cross).
+  EXPOSURE: "M12 3l9 9-9 9-9-9z M12 8v8 M8 12h8",
+
+  // Brilliance — 4-point sparkle / kite (filled, distinct from AUTO's 5 points).
+  BRILLIANCE: "M12 2l2 8 8 2-8 2-2 8-2-8-8-2 8-2z",
+
+  // Highlights — top half-disc (filled, no outer frame).
+  HIGHLIGHTS: "M3 12a9 9 0 0118 0z",
+
+  // Shadows — bottom half-disc (filled, no outer frame).
+  SHADOWS: "M3 12a9 9 0 0018 0z",
+
+  // Contrast — vertical-half filled D-shape (filled).
+  CONTRAST: "M12 3v18a9 9 0 000-18z",
+
+  // Brightness — sun with rays (stroked).
+  BRIGHTNESS:
+    "M12 8a4 4 0 100 8 4 4 0 000-8z M12 2v3 M12 19v3 M5 12H2 M22 12h-3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1",
+
+  // Black Point — small filled square reference dot (filled, no frame).
+  BLACK_POINT: "M8 8h8v8H8z",
+
+  // Saturation — paint drop with horizontal swatch line (stroked).
+  SATURATION: "M12 3c-3 5-6 9-6 13a6 6 0 0012 0c0-4-3-8-6-13z M9 15h6",
+
+  // Vibrance — full water droplet (stroked, larger fill curve than Saturation).
   VIBRANCE: "M12 22s8-5 8-12a8 8 0 00-16 0c0 7 8 12 8 12z",
-  
-  // Warmth: Thermometer
-  WARMTH: "M14 14.76V3.5a2.5 2.5 0 00-5 0v11.26a4.5 4.5 0 105 0z",
-  
-  // Tint: Color Swatch/Layers
-  TINT: "M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5",
-  
-  // Sharpness: Triangle with interior line
-  SHARPNESS: "M12 2l10 20H2L12 2z M12 8v10",
-  
-  // Definition: Focus square
-  DEFINITION: "M3 7V5a2 2 0 012-2h2 M17 3h2a2 2 0 012 2v2 M21 17v2a2 2 0 01-2 2h-2 M7 21H5a2 2 0 01-2-2v-2 M12 12m-1 0a1 1 0 102 0 1 1 0 00-2 0",
-  
-  // Noise Reduction: Shield or filtered circle
-  NOISE_REDUCTION: "M12 22a10 10 0 100-20 10 10 0 000 20z M7 12h10",
-  
-  // Vignette: Outer focused circle
-  VIGNETTE: "M12 22a10 10 0 100-20 10 10 0 000 20z M12 12m-8 0a8 8 0 1016 0 8 8 0 00-16 0",
-  
+
+  // Warmth — thermometer (stroked).
+  WARMTH:
+    "M14 14.76V3.5a2.5 2.5 0 00-5 0v11.26a4.5 4.5 0 105 0z M12 6v9",
+
+  // Tint — eyedropper (stroked, distinct from droplets).
+  TINT: "M19 3l2 2-9 9-3-3 9-9z M11 11l-7 7v3h3l7-7",
+
+  // Sharpness — solid filled triangle / peak (filled).
+  SHARPNESS: "M12 4l9 16H3z",
+
+  // Definition — focus brackets at four corners (stroked).
+  DEFINITION:
+    "M3 8V5a2 2 0 012-2h3 M21 8V5a2 2 0 00-2-2h-3 M3 16v3a2 2 0 002 2h3 M21 16v3a2 2 0 01-2 2h-3",
+
+  // Noise Reduction — 4×4 grain dot grid (stroked, round caps render as dots).
+  NOISE_REDUCTION:
+    "M5 5h.01 M10 5h.01 M15 5h.01 M19 5h.01 M5 10h.01 M10 10h.01 M15 10h.01 M19 10h.01 M5 15h.01 M10 15h.01 M15 15h.01 M19 15h.01 M5 19h.01 M10 19h.01 M15 19h.01 M19 19h.01",
+
+  // Vignette — outer rounded frame + inner circle (stroked, two distinct shapes).
+  VIGNETTE:
+    "M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z M12 8a4 4 0 100 8 4 4 0 000-8z",
+
+  // Generic tab icons (top-level toolbar)
   PENCIL: "M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z",
   CROP: "M6.13 1L6 16a2 2 0 002 2h15 M1 6.13L16 6a2 2 0 012 2v15",
-  FILTER: "M12 15a5 5 0 100-10 5 5 0 000 10z M8 12a5 5 0 100-10 5 5 0 000 10z M16 12a5 5 0 100-10 5 5 0 000 10z",
-  ADJUST: "M21 4H14M10 4H3M21 12H12M8 12H3M21 20H16M12 20H3M14 2v4M8 10v4M16 18v4",
+  FILTER:
+    "M12 15a5 5 0 100-10 5 5 0 000 10z M8 12a5 5 0 100-10 5 5 0 000 10z M16 12a5 5 0 100-10 5 5 0 000 10z",
+  ADJUST:
+    "M21 4H14M10 4H3M21 12H12M8 12H3M21 20H16M12 20H3M14 2v4M8 10v4M16 18v4",
 };
 
 export type IconName = keyof typeof ICON_PATHS;
 
+// Icons whose silhouette is meant to be a solid shape (filled).
+// Everything else is rendered as a stroke.
+const FILLED_ICONS = new Set<IconName>([
+  "AUTO",
+  "BRILLIANCE",
+  "HIGHLIGHTS",
+  "SHADOWS",
+  "CONTRAST",
+  "BLACK_POINT",
+  "SHARPNESS",
+  "FILTER",
+]);
+
 interface SkiaIconProps {
-  name: IconName;
+  name:  IconName;
   color: string;
   size?: number;
 }
@@ -65,11 +93,8 @@ export const SkiaIcon = ({ name, color, size = 24 }: SkiaIconProps) => {
   const pathData = ICON_PATHS[name];
   if (!pathData) return null;
 
-  const scale = size / 24;
-
-  // Define which icons should use fill vs stroke
-  const fillIcons = ["CONTRAST", "HIGHLIGHTS", "SHADOWS", "BLACK_POINT", "SATURATION", "FILTER"];
-  const isFill = fillIcons.includes(name);
+  const scale  = size / 24;
+  const isFill = FILLED_ICONS.has(name);
 
   return (
     <Canvas style={{ width: size, height: size }}>
@@ -78,7 +103,7 @@ export const SkiaIcon = ({ name, color, size = 24 }: SkiaIconProps) => {
           path={pathData}
           color={color}
           style={isFill ? "fill" : "stroke"}
-          strokeWidth={1.5}
+          strokeWidth={1.6}
           strokeCap="round"
           strokeJoin="round"
         />

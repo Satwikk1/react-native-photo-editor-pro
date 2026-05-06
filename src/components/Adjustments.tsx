@@ -1,10 +1,19 @@
-import React, { useState, useMemo, useCallback } from "react";
-import { StyleSheet, View, FlatList, Text } from "react-native";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import {
+  StyleSheet,
+  View,
+  FlatList,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  Pressable,
+} from "react-native";
 import { Canvas, ColorMatrix, Group, Image, RuntimeShader } from "@shopify/react-native-skia";
 
 import type { EditorStateManager } from "../state/EditorStateManager";
 import { RulerDial } from "./RulerDial";
 import { ToolButton } from "./ToolButton";
+import { analyzeImage } from "./adjustments/autoEnhance";
 import {
   AdjustTool,
   ADJUST_TOOLS,
@@ -23,6 +32,11 @@ interface AdjustmentsProps {
 
 export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
   const [activeToolId, setActiveToolId] = useState<AdjustTool>(AdjustTool.EXPOSURE);
+  const [isAnalyzing,  setIsAnalyzing]  = useState(false);
+
+  // Track whether we have run an analysis for this image so we only re-analyse
+  // on explicit user request, not every time they switch back to the AUTO tool.
+  const hasAnalysedRef = useRef(false);
 
   const {
     canvasLayout,
@@ -47,11 +61,30 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
   const xOffset    = 0;
   const yOffset    = (canvasLayout.height - drawHeight) / 2;
 
-  // ─── Handlers ─────────────────────────────────────────────────────────────
+  // ─── Auto-enhance ─────────────────────────────────────────────────────────
+
+  const runAutoAnalysis = useCallback(async () => {
+    setIsAnalyzing(true);
+    const targets = await analyzeImage(image);
+    if (targets) {
+      stateManager.applyAutoTargets(targets, 50);
+      hasAnalysedRef.current = true;
+    }
+    setIsAnalyzing(false);
+  }, [image, stateManager]);
+
+  // Auto-trigger analysis the first time the user opens the AUTO tool.
+  useEffect(() => {
+    if (activeToolId === AdjustTool.AUTO && !hasAnalysedRef.current) {
+      runAutoAnalysis();
+    }
+  }, [activeToolId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Generic handlers ─────────────────────────────────────────────────────
 
   const handleToolChange = useCallback((val: number) => {
-    const config  = TOOL_STATE_CONFIG[activeToolId];
-    const sm      = stateManager as any;
+    const config = TOOL_STATE_CONFIG[activeToolId];
+    const sm     = stateManager as any;
     sm[config.rawKey].value  = Math.round(val);
     sm[config.procKey].value = config.normalize(val);
   }, [activeToolId, stateManager]);
@@ -60,6 +93,18 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
     const sm = stateManager as any;
     return sm[TOOL_STATE_CONFIG[id].rawKey];
   }, [stateManager]);
+
+  // ─── Render helpers ───────────────────────────────────────────────────────
+
+  const renderDial = () => (
+    <RulerDial
+      key={activeToolId}
+      value={getRawValue(activeToolId).value}
+      min={activeTool.range[0]}
+      max={activeTool.range[1]}
+      onChange={handleToolChange}
+    />
+  );
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -112,14 +157,22 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
         </View>
 
         <View style={styles.dialWrapper}>
-          <Text style={styles.toolNameText}>{activeTool.name}</Text>
-          <RulerDial
-            key={activeToolId}
-            value={getRawValue(activeToolId).value}
-            min={activeTool.range[0]}
-            max={activeTool.range[1]}
-            onChange={handleToolChange}
-          />
+          <View style={styles.toolNameRow}>
+            <Text style={styles.toolNameText}>
+              {activeToolId === AdjustTool.AUTO ? "AUTO INTENSITY" : activeTool.name}
+            </Text>
+            {activeToolId === AdjustTool.AUTO && (
+              <View style={styles.reAnalyseSlot}>
+                {isAnalyzing
+                  ? <ActivityIndicator color="#FFCC00" size="small" />
+                  : <Pressable onPress={runAutoAnalysis} style={styles.reAnalyseButton}>
+                      <Text style={styles.reAnalyseText}>Re-analyse</Text>
+                    </Pressable>
+                }
+              </View>
+            )}
+          </View>
+          {renderDial()}
         </View>
       </View>
     </View>
@@ -152,17 +205,42 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
   },
   dialWrapper: {
-    height: 80,
+    minHeight: 80,
     alignItems: "center",
     justifyContent: "center",
+  },
+  toolNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    marginBottom: 8,
+    gap: 8,
   },
   toolNameText: {
     color: "#FFF",
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1,
-    marginTop: 10,
-    marginBottom: 8,
     textTransform: "uppercase",
+  },
+  reAnalyseSlot: {
+    width: 90,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reAnalyseButton: {
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FFCC00",
+    backgroundColor: "rgba(255,204,0,0.08)",
+  },
+  reAnalyseText: {
+    color: "#FFCC00",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.5,
   },
 });
