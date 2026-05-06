@@ -62,8 +62,10 @@ export const ICON_PATHS = {
   // Generic tab icons (top-level toolbar)
   PENCIL: "M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z",
   CROP: "M6.13 1L6 16a2 2 0 002 2h15 M1 6.13L16 6a2 2 0 012 2v15",
+  // Three overlapping circles (RGB Venn diagram) — universal photo-filter icon.
+  // Stroked so the overlapping regions read as distinct shapes, not a blob.
   FILTER:
-    "M12 15a5 5 0 100-10 5 5 0 000 10z M8 12a5 5 0 100-10 5 5 0 000 10z M16 12a5 5 0 100-10 5 5 0 000 10z",
+    "M9 10m-4.5 0a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0 M15 10m-4.5 0a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0 M12 15.2m-4.5 0a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0",
   ADJUST:
     "M21 4H14M10 4H3M21 12H12M8 12H3M21 20H16M12 20H3M14 2v4M8 10v4M16 18v4",
 };
@@ -80,7 +82,6 @@ const FILLED_ICONS = new Set<IconName>([
   "CONTRAST",
   "BLACK_POINT",
   "SHARPNESS",
-  "FILTER",
 ]);
 
 interface SkiaIconProps {

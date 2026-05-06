@@ -1,58 +1,60 @@
-import React from 'react';
-import { StyleSheet, View, TouchableOpacity } from 'react-native';
-import { Canvas, Image, ColorMatrix, SkImage } from '@shopify/react-native-skia';
+import React from "react";
+import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { Canvas, ColorMatrix, Image, RuntimeShader } from "@shopify/react-native-skia";
+import type { SkImage } from "@shopify/react-native-skia";
+
+import type { FilterConfig } from "./filters/registry";
+import { IDENTITY_MATRIX } from "./filters/registry";
+
+const THUMB_W = 58;
+const THUMB_H = 76;
+const RADIUS  = 8;
 
 interface FilterThumbnailProps {
-  image: SkImage;
-  filter: { name: string, b: number, c: number, s: number };
+  image:    SkImage;
+  filter:   FilterConfig;
   isActive: boolean;
-  onPress: () => void;
+  onPress:  () => void;
 }
 
-export const FilterThumbnail = ({ image, filter, isActive, onPress }: FilterThumbnailProps) => {
-  const b = filter.b;
-  const c = filter.c;
-  const s = filter.s;
-  const t = (1 - c) / 2;
-  const lumR = 0.213, lumG = 0.715, lumB = 0.072;
-  
-  const matrix = [
-    c * ( (1-s)*lumR + s )  , c * ( (1-s)*lumG )      , c * ( (1-s)*lumB )      , 0, t*255 + (b-1)*255,
-    c * ( (1-s)*lumR )      , c * ( (1-s)*lumG + s )  , c * ( (1-s)*lumB )      , 0, t*255 + (b-1)*255,
-    c * ( (1-s)*lumR )      , c * ( (1-s)*lumG )      , c * ( (1-s)*lumB + s )  , 0, t*255 + (b-1)*255,
-    0                       , 0                       , 0                       , 1, 0,
-  ];
+export const FilterThumbnail = ({ image, filter, isActive, onPress }: FilterThumbnailProps) => (
+  <TouchableOpacity onPress={onPress} activeOpacity={0.75}>
+    <View style={styles.wrapper}>
+      {/* Canvas — borderRadius + overflow clipping lives on the Canvas itself
+          because Skia canvases don't honour a parent View's overflow:hidden. */}
+      <Canvas style={styles.canvas}>
+        <Image image={image} x={0} y={0} width={THUMB_W} height={THUMB_H} fit="cover">
+          {filter.effect
+            ? <RuntimeShader source={filter.effect} uniforms={{ intensity: 1.0 }} />
+            : <ColorMatrix matrix={filter.matrix ?? IDENTITY_MATRIX} />
+          }
+        </Image>
+      </Canvas>
 
-  return (
-    <TouchableOpacity onPress={onPress} style={styles.thumbnailWrapper}>
-      <View style={[styles.thumbnailContainer, isActive && styles.activeThumbnail]}>
-        <Canvas style={styles.thumbnailCanvas}>
-          <Image image={image} x={0} y={0} width={60} height={80} fit="cover">
-            <ColorMatrix matrix={matrix} />
-          </Image>
-        </Canvas>
-      </View>
-    </TouchableOpacity>
-  );
-};
+      {/* Selection border rendered as an absolute overlay so it sits on top of the
+          image without interfering with the Canvas clipping region. */}
+      {isActive && <View style={styles.activeBorder} />}
+    </View>
+  </TouchableOpacity>
+);
 
 const styles = StyleSheet.create({
-  thumbnailWrapper: {
-    alignItems: 'center',
+  wrapper: {
+    width:        THUMB_W,
+    height:       THUMB_H,
+    borderRadius: RADIUS,
+    overflow:     "hidden",  // clips the Canvas on the native side
   },
-  thumbnailContainer: {
-    width: 60,
-    height: 80,
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: 'transparent',
+  canvas: {
+    width:        THUMB_W,
+    height:       THUMB_H,
+    borderRadius: RADIUS,   // Skia respects this on its own layer
+    overflow:     "hidden",
   },
-  activeThumbnail: {
-    borderColor: '#FFD60A',
-  },
-  thumbnailCanvas: {
-    width: 60,
-    height: 80,
+  activeBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: RADIUS,
+    borderWidth:  2.5,
+    borderColor:  "#FFD60A",
   },
 });

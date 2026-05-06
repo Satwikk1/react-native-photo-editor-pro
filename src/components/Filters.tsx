@@ -1,171 +1,309 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, Dimensions, Text, ScrollView, LayoutChangeEvent } from 'react-native';
-import { Canvas, Image, ColorMatrix, Group } from '@shopify/react-native-skia';
-import { useDerivedValue } from 'react-native-reanimated';
+import React, { useState, useCallback } from "react";
+import {
+  Dimensions,
+  FlatList,
+  LayoutChangeEvent,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  Text,
+  View,
+} from "react-native";
+import Animated, {
+  useAnimatedProps,
+  useAnimatedStyle,
+  useSharedValue,
+  useDerivedValue,
+  withTiming,
+  Easing,
+} from "react-native-reanimated";
+import { Canvas, ColorMatrix, Group, Image, RuntimeShader } from "@shopify/react-native-skia";
 
-import { EditorStateManager } from '../state/EditorStateManager';
-import { FilterThumbnail } from './FilterThumbnail';
-import { RulerDial } from './RulerDial';
+import type { EditorStateManager } from "../state/EditorStateManager";
+import { FilterThumbnail } from "./FilterThumbnail";
+import { RulerDial } from "./RulerDial";
+import {
+  blendMatrix,
+  IDENTITY_MATRIX,
+  PRO_FILTERS,
+  type FilterCategory,
+  type FilterConfig,
+} from "./filters/registry";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-interface FilterProps {
+const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const ORIGINAL_FILTER = PRO_FILTERS[0];
+const DIAL_MAX_H = 80;
+const TIMING_CFG = { duration: 260, easing: Easing.out(Easing.cubic) };
+
+// Height of everything in the controls overlay that doesn't animate:
+// paddingTop(6) + categoryRow(~44) + thumbnailStrip(104) = 154
+const STATIC_CTRL_H = 154;
+
+const CATEGORIES: { key: FilterCategory | "all"; label: string }[] = [
+  { key: "all",       label: "All"       },
+  { key: "analog",    label: "Analog"    },
+  { key: "cinematic", label: "Cinematic" },
+  { key: "bw",        label: "B&W"       },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+interface FiltersProps {
   stateManager: EditorStateManager;
 }
 
-const FILTERS = [
-  { name: 'ORIGINAL', b: 1.0, c: 1.0, s: 1.0 },
-  { name: 'VIVID', b: 1.1, c: 1.2, s: 1.4 },
-  { name: 'VIVID WARM', b: 1.15, c: 1.2, s: 1.5 },
-  { name: 'VIVID COOL', b: 1.05, c: 1.2, s: 1.3 },
-  { name: 'DRAMATIC', b: 0.9, c: 1.3, s: 0.8 },
-  { name: 'MONO', b: 1.0, c: 1.1, s: 0.0 },
-  { name: 'SILVERTONE', b: 1.1, c: 1.0, s: 0.0 },
-  { name: 'NOIR', b: 0.8, c: 1.5, s: 0.0 },
-];
+export const Filters = ({ stateManager }: FiltersProps) => {
+  const { rotation, flipX, originalImage: image } = stateManager;
 
-export const Filters = ({ stateManager }: FilterProps) => {
-  const { brightness, contrast, saturation, flipX, rotation, originalImage: image } = stateManager;
-  const [canvasLayout, setCanvasLayout] = useState({ width: SCREEN_WIDTH, height: 400 });
-  const [activeFilterIndex, setActiveFilterIndex] = useState(0);
-  const [intensity, setIntensity] = useState(100);
+  // React state: only used for canvas style dimensions (fires on layout, not during animation)
+  const [canvasLayout,   setCanvasLayout]   = useState({ width: SCREEN_WIDTH, height: SCREEN_WIDTH });
+  const [activeFilter,   setActiveFilter]   = useState<FilterConfig>(ORIGINAL_FILTER);
+  const [activeCategory, setActiveCategory] = useState<FilterCategory | "all">("all");
 
-  const onLayout = (e: LayoutChangeEvent) => {
-    setCanvasLayout({
-      width: e.nativeEvent.layout.width,
-      height: e.nativeEvent.layout.height,
-    });
+  // SharedValues — updated on the UI thread, never trigger React re-renders
+  const intensitySV    = useSharedValue(100);
+  const activeMatrixSV = useSharedValue<number[]>(IDENTITY_MATRIX);
+  const dialHeightSV   = useSharedValue(0);
+  const canvasHeightSV = useSharedValue(SCREEN_WIDTH); // kept in sync with canvasLayout.height
+
+  // ─── Handlers ───────────────────────────────────────────────────────────
+
+  const handleFilterSelect = useCallback((filter: FilterConfig) => {
+    setActiveFilter(filter);
+    intensitySV.value    = 100;
+    activeMatrixSV.value = filter.matrix ?? IDENTITY_MATRIX;
+    dialHeightSV.value   = withTiming(filter.id === "original" ? 0 : DIAL_MAX_H, TIMING_CFG);
+  }, [intensitySV, activeMatrixSV, dialHeightSV]);
+
+  const handleIntensityChange = useCallback((val: number) => {
+    "worklet";
+    intensitySV.value = val;
+  }, [intensitySV]);
+
+  const onCanvasLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setCanvasLayout({ width, height });
+    canvasHeightSV.value = height;
   };
 
-  const handleFilterSelect = (index: number) => {
-    setActiveFilterIndex(index);
-    setIntensity(100);
-    
-    const f = FILTERS[index];
-    brightness.value = f.b;
-    contrast.value = f.c;
-    saturation.value = f.s;
-  };
+  // ─── Derived values ─────────────────────────────────────────────────────
 
-  const matrix = useDerivedValue(() => {
-    const targetFilter = FILTERS[activeFilterIndex];
-    const factor = intensity / 100;
-    
-    const b = 1 + (targetFilter.b - 1) * factor + (brightness.value - targetFilter.b);
-    const c = 1 + (targetFilter.c - 1) * factor + (contrast.value - targetFilter.c);
-    const s = 1 + (targetFilter.s - 1) * factor + (saturation.value - targetFilter.s);
-    
-    const t = (1 - c) / 2;
-    const lumR = 0.213, lumG = 0.715, lumB = 0.072;
-    
-    return [
-      c * ( (1-s)*lumR + s )  , c * ( (1-s)*lumG )      , c * ( (1-s)*lumB )      , 0, t*255 + (b-1)*255,
-      c * ( (1-s)*lumR )      , c * ( (1-s)*lumG + s )  , c * ( (1-s)*lumB )      , 0, t*255 + (b-1)*255,
-      c * ( (1-s)*lumR )      , c * ( (1-s)*lumG )      , c * ( (1-s)*lumB + s )  , 0, t*255 + (b-1)*255,
-      0                       , 0                       , 0                       , 1, 0,
-    ];
+  const blendedMatrix = useDerivedValue(() =>
+    blendMatrix(activeMatrixSV.value, intensitySV.value / 100),
+  );
+
+  const shaderUniforms = useDerivedValue(() => ({
+    intensity: intensitySV.value / 100,
+  }));
+
+  // The image draw height is constant (fixed aspect ratio).
+  const drawWidth  = canvasLayout.width;
+  const drawHeight = canvasLayout.width * (image.height() / image.width());
+
+  // Outer Group: slides the image up/down as the dial animates in/out.
+  // Runs entirely on the UI thread — the canvas never resizes.
+  const positionTransform = useDerivedValue(() => {
+    const visibleH = canvasHeightSV.value - STATIC_CTRL_H - dialHeightSV.value;
+    const yOff = (visibleH - drawHeight) / 2;
+    return [{ translateY: yOff }];
   });
 
-  const transform = useDerivedValue(() => [
+  // Inner Group: rotation + flip around the image's own center.
+  const orientationTransform = useDerivedValue(() => [
     { rotate: (rotation.value * Math.PI) / 180 },
-    { scaleX: flipX.value }
+    { scaleX: flipX.value },
   ]);
 
-  const drawWidth = canvasLayout.width;
-  const drawHeight = canvasLayout.width * (image.height() / image.width());
-  const xOffset = 0;
-  const yOffset = (canvasLayout.height - drawHeight) / 2;
+  // Dial area: height + opacity animate together.
+  const dialAnimStyle = useAnimatedStyle(() => ({
+    height:   dialHeightSV.value,
+    opacity:  dialHeightSV.value / DIAL_MAX_H,
+    overflow: "hidden" as const,
+  }));
+
+  // Intensity number label: runs on UI thread, no setState while dragging.
+  const intensityLabelProps = useAnimatedProps(() => {
+    const v = Math.round(intensitySV.value);
+    return { text: `INTENSITY  ${v}`, defaultValue: `INTENSITY  ${v}` };
+  });
+
+  // ─── Filtered list ──────────────────────────────────────────────────────
+
+  const visibleFilters = activeCategory === "all"
+    ? PRO_FILTERS
+    : PRO_FILTERS.filter(f => f.category === activeCategory || f.id === "original");
+
+  // ─── Render ─────────────────────────────────────────────────────────────
 
   return (
     <View style={styles.container}>
-      <View style={styles.canvasContainer} onLayout={onLayout}>
+
+      {/* Canvas — fills full container, never resizes */}
+      <View style={styles.canvasContainer} onLayout={onCanvasLayout}>
         <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }}>
-          <Group 
-            origin={{ x: xOffset + drawWidth / 2, y: yOffset + drawHeight / 2 }}
-            transform={transform}
-          >
-            <Image
-              image={image}
-              x={xOffset}
-              y={yOffset}
-              width={drawWidth}
-              height={drawHeight}
-              fit="contain"
+          {/* Outer: reactive Y position so image stays above the controls overlay */}
+          <Group transform={positionTransform}>
+            {/* Inner: rotation + flip pivot around the image centre */}
+            <Group
+              origin={{ x: drawWidth / 2, y: drawHeight / 2 }}
+              transform={orientationTransform}
             >
-              <ColorMatrix matrix={matrix} />
-            </Image>
+              <Image
+                image={image}
+                x={0}
+                y={0}
+                width={drawWidth}
+                height={drawHeight}
+                fit="contain"
+              >
+                {activeFilter.effect
+                  ? <RuntimeShader source={activeFilter.effect} uniforms={shaderUniforms} />
+                  : <ColorMatrix matrix={blendedMatrix} />
+                }
+              </Image>
+            </Group>
           </Group>
         </Canvas>
       </View>
 
+      {/* Controls — absolute overlay, never pushes the canvas */}
       <View style={styles.controls}>
-        <View style={styles.filterListContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterList}>
-            {FILTERS.map((f, i) => (
-              <View key={f.name} style={styles.filterItemWrapper}>
-                <FilterThumbnail 
-                  image={image}
-                  filter={f}
-                  isActive={activeFilterIndex === i}
-                  onPress={() => handleFilterSelect(i)}
-                />
-                <Text style={[styles.filterName, activeFilterIndex === i && styles.activeFilterName]}>{f.name}</Text>
-              </View>
-            ))}
-          </ScrollView>
+        <View style={styles.categoryRow}>
+          {CATEGORIES.map(cat => (
+            <Pressable
+              key={cat.key}
+              onPress={() => setActiveCategory(cat.key)}
+              style={[styles.categoryPill, activeCategory === cat.key && styles.categoryPillActive]}
+            >
+              <Text style={[styles.categoryLabel, activeCategory === cat.key && styles.categoryLabelActive]}>
+                {cat.label}
+              </Text>
+            </Pressable>
+          ))}
         </View>
 
-        <View style={styles.dialWrapper}>
-          <RulerDial 
-            value={intensity} 
-            min={0}
-            max={100}
-            onChange={setIntensity} 
+        <FlatList
+          horizontal
+          data={visibleFilters}
+          keyExtractor={f => f.id}
+          showsHorizontalScrollIndicator={false}
+          style={styles.thumbnailStrip}
+          contentContainerStyle={styles.thumbnailList}
+          renderItem={({ item }) => (
+            <View style={styles.thumbnailItem}>
+              <FilterThumbnail
+                image={image}
+                filter={item}
+                isActive={activeFilter.id === item.id}
+                onPress={() => handleFilterSelect(item)}
+              />
+              <Text style={[
+                styles.filterName,
+                activeFilter.id === item.id && styles.filterNameActive,
+              ]}>
+                {item.name}
+              </Text>
+            </View>
+          )}
+        />
+
+        <Animated.View style={[styles.dialArea, dialAnimStyle]}>
+          <AnimatedTextInput
+            animatedProps={intensityLabelProps}
+            editable={false}
+            style={styles.intensityLabel}
           />
-        </View>
+          <RulerDial value={100} min={0} max={100} onChange={handleIntensityChange} />
+        </Animated.View>
       </View>
+
     </View>
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: '#000',
+    flex:            1,
+    backgroundColor: "#000",
   },
   canvasContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex:            1,
+    backgroundColor: "#000",
   },
   controls: {
-    height: 180,
-    backgroundColor: '#000',
-    paddingTop: 10,
+    position:        "absolute",
+    left:            0,
+    right:           0,
+    bottom:          0,
+    backgroundColor: "#000",
+    paddingTop:      6,
   },
-  filterListContainer: {
-    height: 100,
+
+  categoryRow: {
+    flexDirection:     "row",
+    justifyContent:    "center",
+    gap:               8,
+    paddingVertical:   6,
+    paddingHorizontal: 16,
   },
-  filterList: {
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    gap: 15,
+  categoryPill: {
+    paddingVertical:   4,
+    paddingHorizontal: 14,
+    borderRadius:      12,
+    borderWidth:       1,
+    borderColor:       "#2A2A2A",
   },
-  filterItemWrapper: {
-    alignItems: 'center',
-    gap: 8,
+  categoryPillActive: {
+    borderColor:     "#FFD60A",
+    backgroundColor: "rgba(255,214,10,0.08)",
+  },
+  categoryLabel: {
+    color:      "#555",
+    fontSize:   12,
+    fontWeight: "600",
+  },
+  categoryLabelActive: {
+    color: "#FFD60A",
+  },
+
+  thumbnailStrip: {
+    height: 104,
+  },
+  thumbnailList: {
+    paddingHorizontal: 16,
+    alignItems:        "center",
+    gap:               12,
+  },
+  thumbnailItem: {
+    alignItems: "center",
+    gap:        5,
   },
   filterName: {
-    color: '#8E8E93',
-    fontSize: 10,
-    fontWeight: '600',
+    color:         "#555",
+    fontSize:      9,
+    fontWeight:    "600",
+    letterSpacing: 0.4,
   },
-  activeFilterName: {
-    color: '#FFD60A',
+  filterNameActive: {
+    color: "#FFD60A",
   },
-  dialWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 60,
+
+  dialArea: {
+    alignItems:     "center",
+    justifyContent: "center",
+  },
+  intensityLabel: {
+    color:         "#FFF",
+    fontSize:      11,
+    fontWeight:    "700",
+    letterSpacing: 1.2,
+    marginBottom:  4,
+    textAlign:     "center",
   },
 });
