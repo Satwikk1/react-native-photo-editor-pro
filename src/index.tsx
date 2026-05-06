@@ -67,19 +67,23 @@ export const PhotoEditor = ({
 
       <View style={styles.editorContainer}>
         {activeTab === "crop" && (
-          <Cropper stateManager={stateManager} />
+          <Cropper stateManager={stateManager} theme={theme} />
         )}
         {activeTab === "filter" && (
-          <Filters stateManager={stateManager} />
+          <Filters stateManager={stateManager} theme={theme} />
         )}
         {activeTab === "adjust" && (
-          <Adjustments stateManager={stateManager} />
+          <Adjustments stateManager={stateManager} theme={theme} />
         )}
         {activeTab === "edit" && (
           <DrawingBoard
             stateManager={stateManager}
+            theme={theme}
             onCancel={() => setActiveTab("crop")}
-            onDone={() => setActiveTab("crop")}
+            onDone={() => {
+              const result = stateManager.generateFinalImage();
+              if (result && onSave) onSave(result);
+            }}
           />
         )}
       </View>

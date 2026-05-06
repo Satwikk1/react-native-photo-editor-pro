@@ -6,7 +6,7 @@ import { SkiaIcon, IconName } from './SkiaIcon';
 
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 
-const CircularProgress = ({ value, max }: { value: SharedValue<number>; max: number }) => {
+const CircularProgress = ({ value, max, color }: { value: SharedValue<number>; max: number; color: string }) => {
   const size = 44;
   const strokeWidth = 2;
   
@@ -25,7 +25,7 @@ const CircularProgress = ({ value, max }: { value: SharedValue<number>; max: num
   return (
     <View style={styles.canvasOverlay} pointerEvents="none">
       <Canvas style={{ flex: 1 }}>
-        <Path path={path} style="stroke" strokeWidth={strokeWidth} color="#FFD60A" strokeCap="round" />
+        <Path path={path} style="stroke" strokeWidth={strokeWidth} color={color} strokeCap="round" />
       </Canvas>
     </View>
   );
@@ -37,6 +37,7 @@ interface ToolButtonProps {
   toolValue: SharedValue<number>;
   onPress: () => void;
   max?: number;
+  primaryColor?: string;
 }
 
 export const ToolButton = ({
@@ -45,6 +46,7 @@ export const ToolButton = ({
   toolValue,
   onPress,
   max = 100,
+  primaryColor = "#FFD60A",
 }: ToolButtonProps) => {
   const animatedProps = useAnimatedProps(() => {
     return {
@@ -53,7 +55,7 @@ export const ToolButton = ({
   });
 
   const hasValue = useDerivedValue(() => toolValue.value !== 0);
-  const iconColor = isActive || hasValue.value ? "#FFD60A" : "#8E8E93";
+  const iconColor = isActive || hasValue.value ? primaryColor : "#8E8E93";
 
   return (
     <TouchableOpacity
@@ -63,7 +65,7 @@ export const ToolButton = ({
         isActive && styles.activeBtn,
       ]}
     >
-      <CircularProgress value={toolValue} max={max} />
+      <CircularProgress value={toolValue} max={max} color={primaryColor} />
       
       {isActive ? (
         <AnimatedTextInput
@@ -102,7 +104,7 @@ const styles = StyleSheet.create({
     bottom: -2,
   },
   activeValueText: {
-    color: '#FFD60A',
+    color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',

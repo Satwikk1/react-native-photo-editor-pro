@@ -54,9 +54,11 @@ const CATEGORIES: { key: FilterCategory | "all"; label: string }[] = [
 
 interface FiltersProps {
   stateManager: EditorStateManager;
+  theme?: { primary?: string };
 }
 
-export const Filters = ({ stateManager }: FiltersProps) => {
+export const Filters = ({ stateManager, theme }: FiltersProps) => {
+  const primaryColor = theme?.primary ?? "#FFD60A";
   const { rotation, flipX, originalImage: image } = stateManager;
 
   // React state: only used for canvas style dimensions (fires on layout, not during animation)
@@ -177,9 +179,15 @@ export const Filters = ({ stateManager }: FiltersProps) => {
             <Pressable
               key={cat.key}
               onPress={() => setActiveCategory(cat.key)}
-              style={[styles.categoryPill, activeCategory === cat.key && styles.categoryPillActive]}
+              style={[
+                styles.categoryPill,
+                activeCategory === cat.key && { borderColor: primaryColor, backgroundColor: `${primaryColor}14` },
+              ]}
             >
-              <Text style={[styles.categoryLabel, activeCategory === cat.key && styles.categoryLabelActive]}>
+              <Text style={[
+                styles.categoryLabel,
+                activeCategory === cat.key && { color: primaryColor },
+              ]}>
                 {cat.label}
               </Text>
             </Pressable>
@@ -200,10 +208,11 @@ export const Filters = ({ stateManager }: FiltersProps) => {
                 filter={item}
                 isActive={activeFilter.id === item.id}
                 onPress={() => handleFilterSelect(item)}
+                primaryColor={primaryColor}
               />
               <Text style={[
                 styles.filterName,
-                activeFilter.id === item.id && styles.filterNameActive,
+                activeFilter.id === item.id && { color: primaryColor },
               ]}>
                 {item.name}
               </Text>
@@ -217,7 +226,7 @@ export const Filters = ({ stateManager }: FiltersProps) => {
             editable={false}
             style={styles.intensityLabel}
           />
-          <RulerDial value={100} min={0} max={100} onChange={handleIntensityChange} />
+          <RulerDial value={100} min={0} max={100} onChange={handleIntensityChange} activeColor={primaryColor} />
         </Animated.View>
       </View>
 

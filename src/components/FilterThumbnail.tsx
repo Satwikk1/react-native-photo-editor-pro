@@ -11,13 +11,14 @@ const THUMB_H = 76;
 const RADIUS  = 8;
 
 interface FilterThumbnailProps {
-  image:    SkImage;
-  filter:   FilterConfig;
-  isActive: boolean;
-  onPress:  () => void;
+  image:        SkImage;
+  filter:       FilterConfig;
+  isActive:     boolean;
+  onPress:      () => void;
+  primaryColor?: string;
 }
 
-export const FilterThumbnail = ({ image, filter, isActive, onPress }: FilterThumbnailProps) => (
+export const FilterThumbnail = ({ image, filter, isActive, onPress, primaryColor = "#FFD60A" }: FilterThumbnailProps) => (
   <TouchableOpacity onPress={onPress} activeOpacity={0.75}>
     <View style={styles.wrapper}>
       {/* Canvas — borderRadius + overflow clipping lives on the Canvas itself
@@ -33,7 +34,7 @@ export const FilterThumbnail = ({ image, filter, isActive, onPress }: FilterThum
 
       {/* Selection border rendered as an absolute overlay so it sits on top of the
           image without interfering with the Canvas clipping region. */}
-      {isActive && <View style={styles.activeBorder} />}
+      {isActive && <View style={[styles.activeBorder, { borderColor: primaryColor }]} />}
     </View>
   </TouchableOpacity>
 );
@@ -55,6 +56,5 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: RADIUS,
     borderWidth:  2.5,
-    borderColor:  "#FFD60A",
   },
 });
