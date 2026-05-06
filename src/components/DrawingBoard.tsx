@@ -109,8 +109,8 @@ export const DrawingBoard = ({
   const imgHeight = SCREEN_WIDTH * (image.height() / image.width());
 
   const transform = useDerivedValue(() => [
-    { rotate: (rotation.value * Math.PI) / 180 },
-    { scaleX: flipX.value },
+    { rotate: (managerRotation.value * Math.PI) / 180 },
+    { scaleX: managerFlipX.value },
   ]);
 
   return (

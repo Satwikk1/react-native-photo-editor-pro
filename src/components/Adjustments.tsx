@@ -11,6 +11,8 @@ import {
   Image,
   ColorMatrix,
   Group,
+  RuntimeShader,
+  Skia,
 } from "@shopify/react-native-skia";
 import { useDerivedValue } from "react-native-reanimated";
 
@@ -20,6 +22,37 @@ import { ToolButton } from "./ToolButton";
 import { IconName } from "./SkiaIcon";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+
+// Highlights, Shadows, and Vibrance require per-pixel luminance/saturation checks
+// which are impossible in a linear ColorMatrix — they need a SkSL shader instead.
+const NON_LINEAR_SKSL = `
+  uniform shader image;
+  uniform float vibrance;
+  uniform float shadows;
+  uniform float highlights;
+
+  vec4 main(vec2 coord) {
+    vec4 c = image.eval(coord);
+    float luma = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+
+    float hMask = smoothstep(0.5, 1.0, luma);
+    c.rgb = c.rgb * (1.0 + highlights * hMask);
+
+    float sMask = 1.0 - smoothstep(0.0, 0.5, luma);
+    c.rgb = c.rgb * (1.0 + shadows * sMask);
+
+    float maxC = max(c.r, max(c.g, c.b));
+    float minC = min(c.r, min(c.g, c.b));
+    float sat = maxC - minC;
+    float luma2 = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+    c.rgb = mix(vec3(luma2), c.rgb, 1.0 + vibrance * (1.0 - sat));
+
+    c.rgb = clamp(c.rgb, 0.0, 1.0);
+    return c;
+  }
+`;
+
+const nonLinearEffect = Skia.RuntimeEffect.Make(NON_LINEAR_SKSL)!;
 
 enum AdjustTool {
   EXPOSURE = "EXPOSURE",
@@ -85,41 +118,50 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
   if (!image) return null;
 
   const matrix = useDerivedValue(() => {
-    // Rec. 709 Luminance
-    const lr = 0.2126;
-    const lg = 0.7152;
-    const lb = 0.0722;
+    // Rec. 709 luminance weights
+    const R_LUM = 0.2126;
+    const G_LUM = 0.7152;
+    const B_LUM = 0.0722;
 
-    // Temperature & Tint
-    const rG = 1 + warmth.value;
-    const bG = 1 - warmth.value;
-    const gG = 1 + tint.value;
+    // Exposure: multiplicative (stored as 1+val/100, so subtract 1 → power of 2)
+    const exp = Math.pow(2, exposure.value - 1);
 
+    const c   = contrast.value;        // 1.0 = neutral
+    const b   = brightness.value - 1;  // 0.0 = neutral
+    const s   = saturation.value;      // 1.0 = neutral
+    const w   = warmth.value;          // 0.0 = neutral
+    const tnt = tint.value;            // 0.0 = neutral
+    const bp  = blackPoint.value;      // 0.0 = neutral
     const pivot = 0.5;
-    const c = contrast.value;
-    const b = brightness.value;
-    const s = saturation.value;
-    const e = exposure.value;
-    const v = vibrance.value; // Simple implementation: blend saturation
-    const bp = blackPoint.value;
 
-    // Apply Black Point as an additional shadow offset
-    const offset = (1 - c) * pivot + (b - 1) + (e - 1) - (bp * 0.5);
+    // Saturation mix coefficients
+    const t  = 1.0 - s;
+    const rS = t * R_LUM;
+    const gS = t * G_LUM;
+    const bS = t * B_LUM;
 
-    const rW = c * rG;
-    const gW = c * gG;
-    const bW = c * bG;
+    // Per-channel gain combines exposure, contrast, and white balance
+    const rG = exp * c * (1 + w);
+    const gG = exp * c * (1 + tnt);
+    const bG = exp * c * (1 - w);
 
-    // Combine saturation and vibrance for simplicity in matrix
-    const totalS = s * v;
+    // Offset implements the contrast pivot and brightness shift
+    const off = (1 - c) * pivot + b - bp * 0.5;
 
     return [
-      rW * ((1 - totalS) * lr + totalS), rW * ((1 - totalS) * lg),     rW * ((1 - totalS) * lb),     0, offset,
-      gW * ((1 - totalS) * lr),     gW * ((1 - totalS) * lg + totalS),  gW * ((1 - totalS) * lb),     0, offset,
-      bW * ((1 - totalS) * lr),     bW * ((1 - totalS) * lg),     bW * ((1 - totalS) * lb + totalS),  0, offset,
-      0,                      0,                      0,                      1, 0,
+      rG * (rS + s), rG * gS,       rG * bS,       0, off,
+      gG * rS,       gG * (gS + s), gG * bS,       0, off,
+      bG * rS,       bG * gS,       bG * (bS + s), 0, off,
+      0,             0,             0,             1, 0,
     ];
   });
+
+  // Uniforms for the RuntimeShader that handles non-linear effects
+  const nonLinearUniforms = useDerivedValue(() => ({
+    vibrance:   vibrance.value - 1.0,  // stored as 1+val/100 → normalize to -1…1
+    shadows:    shadows.value,          // stored as val/100 → -1…1
+    highlights: highlights.value,       // stored as val/100 → -1…1
+  }));
 
   const transform = useDerivedValue(() => [
     { rotate: (rotation.value * Math.PI) / 180 },
@@ -172,11 +214,11 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
         break;
       case AdjustTool.WARMTH:
         stateManager.warmthRaw.value = rounded;
-        stateManager.warmth.value = val / 200;
+        stateManager.warmth.value = val / 500;
         break;
       case AdjustTool.TINT:
         stateManager.tintRaw.value = rounded;
-        stateManager.tint.value = val / 200;
+        stateManager.tint.value = val / 500;
         break;
       case AdjustTool.SHARPNESS:
         stateManager.sharpnessRaw.value = rounded;
@@ -253,7 +295,10 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
               height={drawHeight}
               fit="contain"
             >
+              {/* Pass 1: linear math (exposure, contrast, brightness, saturation, warmth, tint) */}
               <ColorMatrix matrix={matrix} />
+              {/* Pass 2: non-linear math that requires per-pixel luminance/saturation checks */}
+              <RuntimeShader source={nonLinearEffect} uniforms={nonLinearUniforms} />
             </Image>
           </Group>
         </Canvas>
