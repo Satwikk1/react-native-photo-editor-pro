@@ -26,11 +26,13 @@ import { useAdjustmentFilters } from "./adjustments/useAdjustmentFilters";
 
 interface AdjustmentsProps {
   stateManager: EditorStateManager;
+  theme?: { primary?: string };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
+export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
+  const primaryColor = theme?.primary ?? "#FFD60A";
   const [activeToolId, setActiveToolId] = useState<AdjustTool>(AdjustTool.EXPOSURE);
   const [isAnalyzing,  setIsAnalyzing]  = useState(false);
 
@@ -103,6 +105,7 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
       min={activeTool.range[0]}
       max={activeTool.range[1]}
       onChange={handleToolChange}
+      activeColor={primaryColor}
     />
   );
 
@@ -150,6 +153,7 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
                   toolValue={getRawValue(item.id)}
                   onPress={() => setActiveToolId(item.id)}
                   max={item.range[1]}
+                  primaryColor={primaryColor}
                 />
               </View>
             )}
@@ -164,9 +168,9 @@ export const Adjustments = ({ stateManager }: AdjustmentsProps) => {
             {activeToolId === AdjustTool.AUTO && (
               <View style={styles.reAnalyseSlot}>
                 {isAnalyzing
-                  ? <ActivityIndicator color="#FFCC00" size="small" />
-                  : <Pressable onPress={runAutoAnalysis} style={styles.reAnalyseButton}>
-                      <Text style={styles.reAnalyseText}>Re-analyse</Text>
+                  ? <ActivityIndicator color={primaryColor} size="small" />
+                  : <Pressable onPress={runAutoAnalysis} style={[styles.reAnalyseButton, { borderColor: primaryColor, backgroundColor: `${primaryColor}14` }]}>
+                      <Text style={[styles.reAnalyseText, { color: primaryColor }]}>Re-analyse</Text>
                     </Pressable>
                 }
               </View>

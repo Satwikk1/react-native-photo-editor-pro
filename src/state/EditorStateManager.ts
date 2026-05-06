@@ -88,7 +88,7 @@ export class EditorStateManager {
   public flipX: SharedValue<number>;
   public cropRect: SharedValue<CropRect | null>;
   public paths: SharedValue<DrawingPath[]>;
-  public readonly originalImage: SkImage;
+  public originalImage: SkImage;
 
   constructor(image: SkImage) {
     this.originalImage = image;
@@ -152,6 +152,90 @@ export class EditorStateManager {
 
   flip() {
     this.flipX.value = this.flipX.value === 1 ? -1 : 1;
+  }
+
+  // Bakes rotation + flip + perspective + crop into a new originalImage.
+  // pitch/yaw in radians. Resets all geometric state after.
+  commitCrop(pitch = 0, yaw = 0): void {
+    const img = this.originalImage;
+    const rot = this.rotation.value;   // degrees (already includes straighten)
+    const fx  = this.flipX.value;
+    const cr  = this.cropRect.value;
+    const w   = img.width(), h = img.height();
+    const cx  = w / 2, cy = h / 2;
+
+    // Perspective distance scaled to image pixel space.
+    // 700px was calibrated for ~SCREEN_WIDTH display; scale proportionally.
+    const d = 700 * (w / SCREEN_WIDTH);
+
+    // Auto-scale — same formula as the UI worklet so no black corners.
+    const θ    = (rot * Math.PI) / 180;
+    const cosT = Math.cos(Math.abs(θ));
+    const sinT = Math.sin(Math.abs(θ));
+    const straightenScale = Math.max(
+      (w * cosT + h * sinT) / w,
+      (w * sinT + h * cosT) / h,
+    );
+    const pitchScale = Math.abs(pitch) > 0.001 ? 1 / Math.cos(Math.abs(pitch)) : 1;
+    const yawScale   = Math.abs(yaw)   > 0.001 ? 1 / Math.cos(Math.abs(yaw))   : 1;
+    const s = straightenScale * pitchScale * yawScale;
+
+    // ── Step 1: bake all transforms into a full-size surface ──────────────────
+    const surf = Skia.Surface.Make(w, h);
+    if (!surf) return;
+    const canvas = surf.getCanvas();
+
+    canvas.save();
+    canvas.translate(cx, cy);   // pivot = image centre
+
+    // Perspective matrices in Skia 3×3 homogeneous form.
+    // M_rx: rotateX(pitch) with perspective d → [1,0,0, 0,cosα,0, 0,sinα/d,1]
+    // M_ry: rotateY(yaw)   with perspective d → [cosβ,0,0, 0,1,0, sinβ/d,0,1]
+    // Applied outer → inner, matching the CSS transform order.
+    if (Math.abs(pitch) > 0.001) {
+      const α = pitch;
+      canvas.concat(Skia.Matrix([
+        1, 0, 0,
+        0, Math.cos(α), 0,
+        0, Math.sin(α) / d, 1,
+      ]));
+    }
+    if (Math.abs(yaw) > 0.001) {
+      const β = yaw;
+      canvas.concat(Skia.Matrix([
+        Math.cos(β), 0, 0,
+        0, 1, 0,
+        Math.sin(β) / d, 0, 1,
+      ]));
+    }
+
+    canvas.rotate(rot, 0, 0);
+    canvas.scale(fx * s, s);
+    canvas.drawImage(img, -cx, -cy, Skia.Paint());
+    canvas.restore();
+
+    let committed: SkImage = surf.makeImageSnapshot();
+
+    // ── Step 2: apply crop ────────────────────────────────────────────────────
+    if (cr && cr.width > 0 && cr.height > 0) {
+      const cw = Math.round(cr.width), ch = Math.round(cr.height);
+      const cropSurf = Skia.Surface.Make(cw, ch);
+      if (cropSurf) {
+        cropSurf.getCanvas().drawImageRect(
+          committed,
+          Skia.XYWHRect(cr.x, cr.y, cr.width, cr.height),
+          Skia.XYWHRect(0, 0, cw, ch),
+          Skia.Paint(),
+        );
+        committed = cropSurf.makeImageSnapshot();
+      }
+    }
+
+    // ── Step 3: replace image and reset geometric state ───────────────────────
+    this.originalImage  = committed;
+    this.cropRect.value = null;
+    this.rotation.value = 0;
+    this.flipX.value    = 1;
   }
 
   addPath(path: DrawingPath) {

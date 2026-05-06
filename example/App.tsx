@@ -13,6 +13,7 @@ export default function App() {
             uri="https://picsum.photos/800/1200"
             onCancel={() => setShowEditor(false)}
             onSave={(uri: string) => console.log('Saved:', uri)}
+            theme={{ primary: "#8B5CF6" }}
           />
         </View>
       ) : (

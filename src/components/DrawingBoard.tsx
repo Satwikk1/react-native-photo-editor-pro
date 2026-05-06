@@ -15,6 +15,7 @@ import {
   Skia,
   Path,
   Group,
+  PaintStyle,
 } from "@shopify/react-native-skia";
 
 import { EditorStateManager } from "../state/EditorStateManager";
@@ -27,6 +28,7 @@ interface DrawingBoardProps {
   stateManager: EditorStateManager;
   onCancel: () => void;
   onDone: () => void;
+  theme?: { primary?: string };
 }
 
 const COLORS = [
@@ -45,7 +47,9 @@ export const DrawingBoard = ({
   stateManager,
   onCancel,
   onDone,
+  theme,
 }: DrawingBoardProps) => {
+  const primaryColor = theme?.primary ?? "#FFD60A";
   const {
     paths: managerPaths,
     flipX: managerFlipX,
@@ -238,10 +242,38 @@ export const DrawingBoard = ({
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => {
-              managerPaths.value = paths;
+              // Bake paths into originalImage so they persist across all tabs.
+              if (paths.length > 0) {
+                const img = stateManager.originalImage;
+                const iw = img.width(), ih = img.height();
+                const surf = Skia.Surface.Make(iw, ih);
+                if (surf) {
+                  const c = surf.getCanvas();
+                  c.drawImage(img, 0, 0, Skia.Paint());
+
+                  // Scale from display coords to image pixel coords
+                  const scaleX = iw / imgWidth;
+                  const scaleY = iw / imgWidth; // imgWidth used for both axes in draw
+                  const yOff = (ACTUAL_EDITOR_HEIGHT - imgHeight) / 2;
+                  c.save();
+                  c.scale(scaleX, scaleY);
+                  c.translate(0, -yOff);
+                  const pp = Skia.Paint();
+                  pp.setStyle(PaintStyle.Stroke);
+                  paths.forEach((p) => {
+                    pp.setColor(Skia.Color(p.color));
+                    pp.setStrokeWidth(p.width);
+                    c.drawPath(p.path, pp);
+                  });
+                  c.restore();
+                  stateManager.originalImage = surf.makeImageSnapshot();
+                }
+              }
+              // Clear stored paths since they're now baked in
+              managerPaths.value = [];
               onDone();
             }}
-            style={[styles.actionBtn, styles.actionBtnDone]}
+            style={[styles.actionBtn, { backgroundColor: primaryColor }]}
           >
             <Text style={styles.actionBtnTextDone}>Done</Text>
           </TouchableOpacity>
