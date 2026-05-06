@@ -1,6 +1,7 @@
 import { Skia, SkImage, SkPath, PaintStyle } from "@shopify/react-native-skia";
 import { Dimensions } from "react-native";
 import { makeMutable, SharedValue } from "react-native-reanimated";
+import type { AutoTargets } from "../components/adjustments/autoEnhance";
 
 export interface CropRect {
   x: number;
@@ -74,6 +75,15 @@ export class EditorStateManager {
   public noiseReductionRaw: SharedValue<number>;
   public vignetteRaw: SharedValue<number>;
 
+  // Auto-enhance: intensity (0–1) blends manual sliders toward the analysed targets.
+  // Targets live as SharedValues so the colorMatrix worklet can read them reactively.
+  public autoIntensity:       SharedValue<number>;  // processed 0–1
+  public autoIntensityRaw:    SharedValue<number>;  // UI 0–100
+  public autoExposureTarget:   SharedValue<number>;  // neutral 1.0
+  public autoContrastTarget:   SharedValue<number>;  // neutral 1.0
+  public autoWarmthTarget:     SharedValue<number>;  // neutral 0.0
+  public autoSaturationTarget: SharedValue<number>;  // neutral 1.0
+
   public rotation: SharedValue<number>;
   public flipX: SharedValue<number>;
   public cropRect: SharedValue<CropRect | null>;
@@ -116,6 +126,13 @@ export class EditorStateManager {
     this.definitionRaw = makeMutable(0);
     this.noiseReductionRaw = makeMutable(0);
     this.vignetteRaw = makeMutable(0);
+
+    this.autoIntensity       = makeMutable(0);
+    this.autoIntensityRaw    = makeMutable(0);
+    this.autoExposureTarget   = makeMutable(1.0);
+    this.autoContrastTarget   = makeMutable(1.0);
+    this.autoWarmthTarget     = makeMutable(0.0);
+    this.autoSaturationTarget = makeMutable(1.0);
 
     this.rotation = makeMutable(0);
     this.flipX = makeMutable(1);
@@ -169,6 +186,18 @@ export class EditorStateManager {
       vignette: this.vignette.value,
       paths: [...this.paths.value],
     };
+  }
+
+  // Stores analysed targets and sets intensity to `initialIntensity` (0–100).
+  // Does not touch manual slider values — the blend formula in the shader hooks
+  // combines them non-destructively: V_final = V_manual + (V_target - V_neutral) * intensity.
+  applyAutoTargets(targets: AutoTargets, initialIntensity = 50) {
+    this.autoExposureTarget.value   = targets.exposure;
+    this.autoContrastTarget.value   = targets.contrast;
+    this.autoWarmthTarget.value     = targets.warmth;
+    this.autoSaturationTarget.value = targets.saturation;
+    this.autoIntensityRaw.value     = initialIntensity;
+    this.autoIntensity.value        = initialIntensity / 100;
   }
 
   // --- Core Processing Logic ---
