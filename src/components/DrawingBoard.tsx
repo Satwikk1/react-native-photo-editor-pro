@@ -65,6 +65,7 @@ export const DrawingBoard = ({
 
   const [strokeWidth, setStrokeWidth] = useState(4);
   const strokeWidthRef = useRef(4);
+  const hasMovedRef   = useRef(false); // true only after at least one lineTo
 
   // Sync refs so pan responder can access them
   activeColorRef.current = activeColor;
@@ -78,28 +79,40 @@ export const DrawingBoard = ({
         const path = Skia.Path.Make();
         path.moveTo(locationX, locationY);
         currentPathRef.current = path;
-        setCurrentPath(path);
+        hasMovedRef.current    = false;
+        setCurrentPath(path.copy());
       },
       onPanResponderMove: (evt) => {
         const { locationX, locationY } = evt.nativeEvent;
         if (currentPathRef.current) {
           currentPathRef.current.lineTo(locationX, locationY);
+          hasMovedRef.current = true;
           setCurrentPath(currentPathRef.current.copy());
         }
       },
       onPanResponderRelease: () => {
-        if (currentPathRef.current) {
+        // Only commit if the user actually drew a stroke (not a bare tap).
+        // Always snapshot via .copy() so the committed path is a stable
+        // object independent of any further mutations.
+        if (currentPathRef.current && hasMovedRef.current) {
+          const snapshot = currentPathRef.current.copy();
           setPaths((prev) => [
             ...prev,
             {
-              path: currentPathRef.current!,
+              path:  snapshot,
               color: activeColorRef.current,
               width: strokeWidthRef.current,
             },
           ]);
-          currentPathRef.current = null;
-          setCurrentPath(null);
         }
+        currentPathRef.current = null;
+        hasMovedRef.current    = false;
+        setCurrentPath(null);
+      },
+      onPanResponderTerminate: () => {
+        currentPathRef.current = null;
+        hasMovedRef.current    = false;
+        setCurrentPath(null);
       },
     }),
   ).current;

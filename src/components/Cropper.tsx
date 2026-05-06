@@ -1,366 +1,429 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Dimensions, PanResponder, LayoutChangeEvent, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { Canvas, Image, SkImage, Path, Skia, PaintStyle, FillType, Group } from '@shopify/react-native-skia';
+import React, { useState, useRef, useCallback } from "react";
+import {
+  StyleSheet,
+  View,
+  Dimensions,
+  PanResponder,
+  LayoutChangeEvent,
+  Text,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Vibration,
+} from "react-native";
+import {
+  Canvas,
+  Image,
+  Path,
+  Skia,
+  FillType,
+  Group,
+} from "@shopify/react-native-skia";
+import Animated, {
+  useSharedValue,
+  useDerivedValue,
+  useAnimatedProps,
+  useAnimatedReaction,
+  withTiming,
+  withDelay,
+  cancelAnimation,
+  runOnJS,
+  Easing,
+} from "react-native-reanimated";
 
 import { EditorStateManager } from "../state/EditorStateManager";
+import { RulerDial } from "./RulerDial";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-interface Rect { x: number; y: number; width: number; height: number; }
+const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-interface CropperProps {
-  stateManager: EditorStateManager;
+interface CropperProps { stateManager: EditorStateManager; }
+
+const RATIOS = ["ORIGINAL", "SQUARE", "9:16", "4:5", "5:7", "3:4", "3:5", "2:3"];
+const RATIO_VALUES: Record<string, number | null> = {
+  ORIGINAL: null, SQUARE: 1,
+  "9:16": 9/16, "4:5": 4/5, "5:7": 5/7, "3:4": 3/4, "3:5": 3/5, "2:3": 2/3,
+};
+
+const FADE_IN    = { duration: 120, easing: Easing.out(Easing.quad)  };
+const FADE_OUT   = { duration: 600, easing: Easing.in(Easing.quad)   };
+const RATIO_ANIM = { duration: 280, easing: Easing.out(Easing.cubic) };
+const ZOOM_IN    = { duration: 400, easing: Easing.out(Easing.cubic) };
+const ZOOM_OUT   = { duration: 250, easing: Easing.out(Easing.quad)  };
+
+// Light haptic tick — swap for expo-haptics on iOS for a proper selection tick.
+function triggerHapticTick() {
+  try { Vibration.vibrate(10); } catch (_) {}
 }
 
-const RATIOS = ['ORIGINAL', 'FREEFORM', 'SQUARE', '9:16', '4:5', '5:7', '3:4', '3:5', '2:3'];
-
-import { RulerDial } from "./RulerDial";
-import { useDerivedValue } from "react-native-reanimated";
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export const Cropper = ({ stateManager }: CropperProps) => {
-  const {
-    cropRect: managerCropRect,
-    flipX: managerFlipX,
-    rotation: managerRotation,
-    originalImage: image,
-  } = stateManager;
+  const { cropRect: managerCropRect, flipX: managerFlipX, rotation: managerRotation, originalImage: image } = stateManager;
 
-  const [cropRect, setCropRect] = useState<Rect | null>(null);
+  // React state — UI labels only, never mutated during gestures
+  const [canvasLayout, setCanvasLayout] = useState({ width: SCREEN_WIDTH, height: SCREEN_WIDTH });
+  const [activeRatio,  setActiveRatio]  = useState("ORIGINAL");
+  const [isLandscape,  setIsLandscape]  = useState(false);
+  const [selectedTool, setSelectedTool] = useState<"straighten" | "vertical" | "horizontal">("straighten");
 
-  useEffect(() => {
-    if (!cropRect) {
-      setCropRect(managerCropRect.value);
-    }
-  }, []);
+  // ── Crop rect — 4 SharedValues, entire hot path stays on UI thread ──────────
+  const savedCrop = managerCropRect.value ?? { x: 0, y: 0, width: image.width(), height: image.height() };
+  const cropXSV = useSharedValue(savedCrop.x);
+  const cropYSV = useSharedValue(savedCrop.y);
+  const cropWSV = useSharedValue(savedCrop.width);
+  const cropHSV = useSharedValue(savedCrop.height);
 
-  useEffect(() => {
-    if (cropRect) {
-      managerCropRect.value = cropRect;
-    }
-  }, [cropRect]);
+  // ── Canvas layout as SharedValues so path worklets can read them ─────────────
+  const imgAspect  = image.width() / image.height();
+  const initDrawW  = Math.min(SCREEN_WIDTH, SCREEN_WIDTH * imgAspect);
+  const initDrawH  = initDrawW / imgAspect;
 
-  const transform = useDerivedValue(() => [
-    { rotate: ((managerRotation.value + straighten) * Math.PI) / 180 },
-    { scaleX: managerFlipX.value },
-    { skewX: hPerspective * 0.01 },
-    { skewY: vPerspective * 0.01 },
-  ]);
-  const [canvasLayout, setCanvasLayout] = useState({
-    width: SCREEN_WIDTH,
-    height: 400,
-  });
-  const [activeRatio, setActiveRatio] = useState("FREEFORM");
-  const [isLandscape, setIsLandscape] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<
-    "straighten" | "vertical" | "horizontal"
-  >("straighten");
-  const [straighten, setStraighten] = useState(0);
-  const [vPerspective, setVPerspective] = useState(0);
-  const [hPerspective, setHPerspective] = useState(0);
+  const xOffsetSV    = useSharedValue((SCREEN_WIDTH - initDrawW) / 2);
+  const yOffsetSV    = useSharedValue((SCREEN_WIDTH - initDrawH) / 2);
+  const scaleRatioSV = useSharedValue(image.width() / initDrawW);
+  const canvasWSV    = useSharedValue(SCREEN_WIDTH);
+  const canvasHSV    = useSharedValue(SCREEN_WIDTH);
 
-  // Animation ref
-  const animRef = useRef<number | null>(null);
+  // ── Transform SharedValues ───────────────────────────────────────────────────
+  const straightenSV  = useSharedValue(0);
+  const pitchSV       = useSharedValue(0);
+  const yawSV         = useSharedValue(0);
+  const gridOpacitySV = useSharedValue(0);
+  const drawWidthSV   = useSharedValue(initDrawW);
+  const drawHeightSV  = useSharedValue(initDrawH);
 
-  useEffect(() => {
-    if (activeRatio === "FREEFORM") return;
-    if (!cropRect) return;
+  // ── Auto-zoom SharedValues — applied as outer Animated.View transform ────────
+  const zoomScaleSV = useSharedValue(1);
+  const zoomTxSV    = useSharedValue(0);
+  const zoomTySV    = useSharedValue(0);
 
-    const imgW = image.width();
-    const imgH = image.height();
+  // selectedTool as SV so the label worklet always reads the current value
+  const selectedToolSV = useSharedValue(0); // 0=straighten 1=vertical 2=horizontal
 
-    let targetRatio = 1;
-    if (activeRatio === "SQUARE") targetRatio = 1;
-    else if (activeRatio === "9:16") targetRatio = 9 / 16;
-    else if (activeRatio === "4:5") targetRatio = 4 / 5;
-    else if (activeRatio === "5:7") targetRatio = 5 / 7;
-    else if (activeRatio === "3:4") targetRatio = 3 / 4;
-    else if (activeRatio === "3:5") targetRatio = 3 / 5;
-    else if (activeRatio === "2:3") targetRatio = 2 / 3;
-    else if (activeRatio === "ORIGINAL") targetRatio = imgW / imgH;
+  // ─── Haptic tick when straighten crosses 0° ──────────────────────────────────
 
-    if (isLandscape && activeRatio !== "SQUARE" && activeRatio !== "ORIGINAL") {
-      targetRatio = 1 / targetRatio;
-    }
-
-    let targetW = imgW;
-    let targetH = targetW / targetRatio;
-
-    if (targetH > imgH) {
-      targetH = imgH;
-      targetW = targetH * targetRatio;
-    }
-
-    const targetX = (imgW - targetW) / 2;
-    const targetY = (imgH - targetH) / 2;
-
-    const startRect = { ...cropRect };
-    const endRect = { x: targetX, y: targetY, width: targetW, height: targetH };
-
-    if (activeRatio === "ORIGINAL") {
-      endRect.x = 0;
-      endRect.y = 0;
-      endRect.width = imgW;
-      endRect.height = imgH;
-    }
-
-    let startTime: number | null = null;
-    const duration = 300;
-
-    const animate = (time: number) => {
-      if (!startTime) startTime = time;
-      const progress = Math.min((time - startTime) / duration, 1);
-
-      // Easing (ease-out cubic)
-      const ease = 1 - Math.pow(1 - progress, 3);
-
-      setCropRect({
-        x: startRect.x + (endRect.x - startRect.x) * ease,
-        y: startRect.y + (endRect.y - startRect.y) * ease,
-        width: startRect.width + (endRect.width - startRect.width) * ease,
-        height: startRect.height + (endRect.height - startRect.height) * ease,
-      });
-
-      if (progress < 1) {
-        animRef.current = requestAnimationFrame(animate);
+  useAnimatedReaction(
+    () => straightenSV.value > 0,
+    (isPositive, wasPositive) => {
+      if (wasPositive !== null && isPositive !== wasPositive) {
+        runOnJS(triggerHapticTick)();
       }
-    };
+    },
+  );
 
-    if (animRef.current) cancelAnimationFrame(animRef.current);
-    animRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, [activeRatio, isLandscape, image]);
-
-  useEffect(() => {
-    if (!cropRect) {
-      setCropRect({ x: 0, y: 0, width: image.width(), height: image.height() });
-    }
-  }, [image, cropRect, setCropRect]);
+  // ─── Layout ──────────────────────────────────────────────────────────────────
 
   const onLayout = (e: LayoutChangeEvent) => {
-    setCanvasLayout({
-      width: e.nativeEvent.layout.width,
-      height: e.nativeEvent.layout.height,
-    });
+    const { width, height } = e.nativeEvent.layout;
+    setCanvasLayout({ width, height });
+
+    const iRatio = image.width() / image.height();
+    const cRatio = width / height;
+    const dw = iRatio > cRatio ? width  : height * iRatio;
+    const dh = iRatio > cRatio ? width / iRatio : height;
+
+    drawWidthSV.value  = dw;
+    drawHeightSV.value = dh;
+    xOffsetSV.value    = (width  - dw) / 2;
+    yOffsetSV.value    = (height - dh) / 2;
+    scaleRatioSV.value = image.width() / dw;
+    canvasWSV.value    = width;
+    canvasHSV.value    = height;
   };
 
-  const imgRatio = image.width() / image.height();
+  // React-side layout — used only for canvas style, never during gestures
+  const imgRatio    = image.width() / image.height();
   const canvasRatio = canvasLayout.width / canvasLayout.height;
+  const drawWidth   = imgRatio > canvasRatio ? canvasLayout.width  : canvasLayout.height * imgRatio;
+  const drawHeight  = imgRatio > canvasRatio ? canvasLayout.width / imgRatio : canvasLayout.height;
+  const xOffset     = (canvasLayout.width  - drawWidth)  / 2;
+  const yOffset     = (canvasLayout.height - drawHeight) / 2;
 
-  let drawWidth = canvasLayout.width;
-  let drawHeight = canvasLayout.height;
+  // ─── Ratio animation — withTiming on SVs, zero React renders ─────────────────
 
-  if (imgRatio > canvasRatio) {
-    drawHeight = canvasLayout.width / imgRatio;
-  } else {
-    drawWidth = canvasLayout.height * imgRatio;
-  }
+  const applyRatio = useCallback((ratio: string, landscape: boolean) => {
+    if (!RATIO_VALUES.hasOwnProperty(ratio) && ratio !== "ORIGINAL") return;
+    const imgW = image.width(), imgH = image.height();
+    let r = RATIO_VALUES[ratio];
+    if (ratio === "ORIGINAL") r = imgW / imgH;
+    if (!r) return;
+    if (landscape && ratio !== "SQUARE" && ratio !== "ORIGINAL") r = 1 / r;
 
-  const xOffset = (canvasLayout.width - drawWidth) / 2;
-  const yOffset = (canvasLayout.height - drawHeight) / 2;
+    let tw = imgW, th = tw / r;
+    if (th > imgH) { th = imgH; tw = th * r; }
 
-  const scaleRatio = image.width() / drawWidth;
+    const ex = ratio === "ORIGINAL" ? 0 : (imgW - tw) / 2;
+    const ey = ratio === "ORIGINAL" ? 0 : (imgH - th) / 2;
+    const ew = ratio === "ORIGINAL" ? imgW : tw;
+    const eh = ratio === "ORIGINAL" ? imgH : th;
+
+    cropXSV.value = withTiming(ex, RATIO_ANIM);
+    cropYSV.value = withTiming(ey, RATIO_ANIM);
+    cropWSV.value = withTiming(ew, RATIO_ANIM);
+    cropHSV.value = withTiming(eh, RATIO_ANIM);
+  }, []);
+
+  // ─── Image transform worklet ──────────────────────────────────────────────────
+  //
+  // Auto-scale formula (user spec):
+  //   S = max( (W|cosθ| + H|sinθ|) / W,  (W|sinθ| + H|cosθ|) / H )
+  //
+  // This guarantees S ≥ 1 for any θ, growing continuously from 1 at θ=0
+  // so the image always covers the crop frame with no black corners.
+  // Pivot is the image centre, matching the existing Group origin.
+
+  const transform = useDerivedValue(() => {
+    const θ     = (managerRotation.value + straightenSV.value) * Math.PI / 180;
+    const pitch = pitchSV.value * Math.PI / 180;
+    const yaw   = yawSV.value   * Math.PI / 180;
+
+    const W    = drawWidthSV.value;
+    const H    = drawHeightSV.value || 1;
+    const cosT = Math.cos(Math.abs(θ));
+    const sinT = Math.sin(Math.abs(θ));
+
+    // Minimum scale to keep all four corners covered (Paeth / user formula)
+    const straightenScale = Math.max(
+      (W * cosT + H * sinT) / W,
+      (W * sinT + H * cosT) / H,
+    );
+
+    // Perspective axes — same cosine-based scale
+    const pitchScale = Math.abs(pitch) > 0.001 ? 1 / Math.cos(Math.abs(pitch)) : 1;
+    const yawScale   = Math.abs(yaw)   > 0.001 ? 1 / Math.cos(Math.abs(yaw))   : 1;
+
+    const s = straightenScale * pitchScale * yawScale;
+
+    return [
+      { perspective: 700 as number },
+      { rotateX: pitch },
+      { rotateY: yaw   },
+      { rotate:  θ     },
+      { scaleX: s * (managerFlipX.value as number) },
+      { scaleY: s },
+    ];
+  });
+
+  // ─── Overlay paths — UI thread, no React renders ──────────────────────────────
+
+  const overlayPath = useDerivedValue(() => {
+    const p  = Skia.Path.Make();
+    const cw = canvasWSV.value;
+    const ch = canvasHSV.value;
+    const sr = scaleRatioSV.value;
+    const cx = xOffsetSV.value + cropXSV.value / sr;
+    const cy = yOffsetSV.value + cropYSV.value / sr;
+    const rw = cropWSV.value / sr;
+    const rh = cropHSV.value / sr;
+    p.addRect(Skia.XYWHRect(0, 0, cw, ch));
+    p.addRect(Skia.XYWHRect(cx, cy, rw, rh));
+    p.setFillType(FillType.EvenOdd);
+    return p;
+  });
+
+  const gridPath = useDerivedValue(() => {
+    const p  = Skia.Path.Make();
+    const sr = scaleRatioSV.value;
+    const cx = xOffsetSV.value + cropXSV.value / sr;
+    const cy = yOffsetSV.value + cropYSV.value / sr;
+    const rw = cropWSV.value / sr;
+    const rh = cropHSV.value / sr;
+    const tw = rw / 3, th = rh / 3;
+    p.moveTo(cx + tw,     cy); p.lineTo(cx + tw,     cy + rh);
+    p.moveTo(cx + tw * 2, cy); p.lineTo(cx + tw * 2, cy + rh);
+    p.moveTo(cx, cy + th);     p.lineTo(cx + rw, cy + th);
+    p.moveTo(cx, cy + th * 2); p.lineTo(cx + rw, cy + th * 2);
+    p.addRect(Skia.XYWHRect(cx, cy, rw, rh));
+    return p;
+  });
+
+  const handlesPath = useDerivedValue(() => {
+    const p  = Skia.Path.Make();
+    const sr = scaleRatioSV.value;
+    const cx = xOffsetSV.value + cropXSV.value / sr;
+    const cy = yOffsetSV.value + cropYSV.value / sr;
+    const rw = cropWSV.value / sr;
+    const rh = cropHSV.value / sr;
+    const hl = 22;
+    p.moveTo(cx,        cy + hl); p.lineTo(cx,       cy);       p.lineTo(cx + hl,      cy);
+    p.moveTo(cx+rw-hl,  cy);      p.lineTo(cx + rw,  cy);       p.lineTo(cx + rw,       cy + hl);
+    p.moveTo(cx,        cy+rh-hl);p.lineTo(cx,        cy + rh); p.lineTo(cx + hl,      cy + rh);
+    p.moveTo(cx+rw-hl,  cy + rh); p.lineTo(cx + rw,  cy + rh); p.lineTo(cx + rw,       cy+rh-hl);
+    return p;
+  });
+
+  // ─── Auto-zoom — Animated.View wrapping the canvas ───────────────────────────
+
+  const zoomStyle = useAnimatedStyle(() => ({
+    transform: [
+      // scale first (around view centre), then translate in pre-scale coords
+      { scale:      zoomScaleSV.value },
+      { translateX: zoomTxSV.value    },
+      { translateY: zoomTySV.value    },
+    ],
+  }));
+
+  const cancelZoom = () => {
+    cancelAnimation(zoomScaleSV);
+    cancelAnimation(zoomTxSV);
+    cancelAnimation(zoomTySV);
+    zoomScaleSV.value = withTiming(1, ZOOM_OUT);
+    zoomTxSV.value    = withTiming(0, ZOOM_OUT);
+    zoomTySV.value    = withTiming(0, ZOOM_OUT);
+  };
+
+  const triggerZoom = () => {
+    const sr = scaleRatioSV.value;
+    const cw_canvas = canvasWSV.value;
+    const ch_canvas = canvasHSV.value;
+    const cx = xOffsetSV.value + cropXSV.value / sr;
+    const cy = yOffsetSV.value + cropYSV.value / sr;
+    const cw = cropWSV.value / sr;
+    const ch = cropHSV.value / sr;
+
+    if (cw <= 0 || ch <= 0) return;
+
+    // Scale so crop fills the viewport (letterbox if needed)
+    const targetScale = Math.min(cw_canvas / cw, ch_canvas / ch);
+    // Translate so crop centre lands at canvas centre (in pre-scale coords)
+    const targetTx = cw_canvas / 2 - cx - cw / 2;
+    const targetTy = ch_canvas / 2 - cy - ch / 2;
+
+    zoomScaleSV.value = withDelay(1000, withTiming(targetScale, ZOOM_IN));
+    zoomTxSV.value    = withDelay(1000, withTiming(targetTx,    ZOOM_IN));
+    zoomTySV.value    = withDelay(1000, withTiming(targetTy,    ZOOM_IN));
+
+    // Grid fades out after zoom animation completes (1000ms delay + 400ms anim)
+    gridOpacitySV.value = withDelay(1400, withTiming(0, FADE_OUT));
+  };
+
+  // ─── Dial ─────────────────────────────────────────────────────────────────────
+
+  const handleDialChange = useCallback((val: number) => {
+    "worklet";
+    if (selectedToolSV.value === 0) straightenSV.value = val;
+    else if (selectedToolSV.value === 1) pitchSV.value = val;
+    else yawSV.value = val;
+  }, [selectedToolSV, straightenSV, pitchSV, yawSV]);
+
+  const activeDialSV =
+    selectedTool === "straighten" ? straightenSV :
+    selectedTool === "vertical"   ? pitchSV      : yawSV;
+
+  const dialLabelProps = useAnimatedProps(() => {
+    const t  = selectedToolSV.value;
+    const sv = t === 0 ? straightenSV : t === 1 ? pitchSV : yawSV;
+    const v  = Math.round(sv.value);
+    const prefix = t === 0 ? "STRAIGHTEN" : t === 1 ? "VERTICAL" : "HORIZONTAL";
+    const label  = `${prefix}  ${v > 0 ? "+" : ""}${v}°`;
+    return { text: label, defaultValue: label };
+  });
+
+  // ─── Crop pan responder ───────────────────────────────────────────────────────
 
   const dragState = useRef<{
-    activeHandle: "tl" | "tr" | "bl" | "br" | "center" | null;
-    startCrop: Rect | null;
-    startX: number;
-    startY: number;
-  }>({ activeHandle: null, startCrop: null, startX: 0, startY: 0 });
-
-  const getHandle = (
-    x: number,
-    y: number,
-    cx: number,
-    cy: number,
-    cw: number,
-    ch: number,
-  ) => {
-    const HIT_SLOP = 45;
-    if (Math.abs(x - cx) < HIT_SLOP && Math.abs(y - cy) < HIT_SLOP) return "tl";
-    if (Math.abs(x - (cx + cw)) < HIT_SLOP && Math.abs(y - cy) < HIT_SLOP)
-      return "tr";
-    if (Math.abs(x - cx) < HIT_SLOP && Math.abs(y - (cy + ch)) < HIT_SLOP)
-      return "bl";
-    if (
-      Math.abs(x - (cx + cw)) < HIT_SLOP &&
-      Math.abs(y - (cy + ch)) < HIT_SLOP
-    )
-      return "br";
-
-    if (x >= cx && x <= cx + cw && y >= cy && y <= cy + ch) return "center";
-    return null;
-  };
-
-  const stateRef = useRef({
-    cropRect,
-    scaleRatio,
-    xOffset,
-    yOffset,
-    imageWidth: image.width(),
-    imageHeight: image.height(),
-  });
-  stateRef.current = {
-    cropRect,
-    scaleRatio,
-    xOffset,
-    yOffset,
-    imageWidth: image.width(),
-    imageHeight: image.height(),
-  };
+    handle: "tl"|"tr"|"bl"|"br"|"center"|null;
+    startX: number; startY: number; startW: number; startH: number;
+    lockedRatio: number;
+  }>({ handle: null, startX: 0, startY: 0, startW: 0, startH: 0, lockedRatio: 1 });
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder:  () => true,
+
       onPanResponderGrant: (evt) => {
-        const {
-          cropRect: currentCropRect,
-          scaleRatio: sRatio,
-          xOffset: xOff,
-          yOffset: yOff,
-        } = stateRef.current;
-        if (!currentCropRect) return;
-        const { locationX, locationY } = evt.nativeEvent;
+        // Cancel any pending zoom and snap back to 1:1
+        cancelZoom();
 
-        const cx = xOff + currentCropRect.x / sRatio;
-        const cy = yOff + currentCropRect.y / sRatio;
-        const cw = currentCropRect.width / sRatio;
-        const ch = currentCropRect.height / sRatio;
+        gridOpacitySV.value = withTiming(1, FADE_IN);
 
-        const handle = getHandle(locationX, locationY, cx, cy, cw, ch);
+        const sr = scaleRatioSV.value;
+        const cx = xOffsetSV.value + cropXSV.value / sr;
+        const cy = yOffsetSV.value + cropYSV.value / sr;
+        const cw = cropWSV.value / sr;
+        const ch = cropHSV.value / sr;
+
+        const { locationX: lx, locationY: ly } = evt.nativeEvent;
+        const S = 44;
+        let handle: typeof dragState.current.handle = null;
+        if      (Math.abs(lx - cx)      < S && Math.abs(ly - cy)      < S) handle = "tl";
+        else if (Math.abs(lx - cx - cw) < S && Math.abs(ly - cy)      < S) handle = "tr";
+        else if (Math.abs(lx - cx)      < S && Math.abs(ly - cy - ch) < S) handle = "bl";
+        else if (Math.abs(lx - cx - cw) < S && Math.abs(ly - cy - ch) < S) handle = "br";
+        else if (lx >= cx && lx <= cx + cw && ly >= cy && ly <= cy + ch)   handle = "center";
+
         dragState.current = {
-          activeHandle: handle,
-          startCrop: { ...currentCropRect },
-          startX: locationX,
-          startY: locationY,
+          handle,
+          startX: cropXSV.value, startY: cropYSV.value,
+          startW: cropWSV.value, startH: cropHSV.value,
+          lockedRatio: cropWSV.value / (cropHSV.value || 1),
         };
       },
-      onPanResponderMove: (evt, gestureState) => {
-        const { activeHandle, startCrop } = dragState.current;
-        if (!activeHandle || !startCrop) return;
 
-        const {
-          scaleRatio: sRatio,
-          imageWidth,
-          imageHeight,
-          cropRect: currentCropRect,
-        } = stateRef.current;
+      onPanResponderMove: (_, g) => {
+        const { handle, startX, startY, startW, startH } = dragState.current;
+        if (!handle) return;
 
-        const dx = gestureState.dx * sRatio;
-        const dy = gestureState.dy * sRatio;
+        const sr = scaleRatioSV.value;
+        const iw = image.width(), ih = image.height();
+        const dx = g.dx * sr, dy = g.dy * sr;
+        let nx = startX, ny = startY, nw = startW, nh = startH;
+        const min = 60 * sr;
 
-        let newX = startCrop.x;
-        let newY = startCrop.y;
-        let newW = startCrop.width;
-        let newH = startCrop.height;
-
-        const minSize = 100 * sRatio;
-
-        if (activeHandle === "center") {
-          newX += dx;
-          newY += dy;
+        if (handle === "center") {
+          nx = Math.max(0, Math.min(startX + dx, iw - nw));
+          ny = Math.max(0, Math.min(startY + dy, ih - nh));
         } else {
-          if (activeHandle === "tl" || activeHandle === "bl") {
-            newX += dx;
-            newW -= dx;
-          }
-          if (activeHandle === "tr" || activeHandle === "br") {
-            newW += dx;
-          }
-          if (activeHandle === "tl" || activeHandle === "tr") {
-            newY += dy;
-            newH -= dy;
-          }
-          if (activeHandle === "bl" || activeHandle === "br") {
-            newH += dy;
-          }
+          if (handle === "tl" || handle === "bl") { nx += dx; nw -= dx; }
+          if (handle === "tr" || handle === "br") { nw += dx; }
+          if (handle === "tl" || handle === "tr") { ny += dy; nh -= dy; }
+          if (handle === "bl" || handle === "br") { nh += dy; }
+          if (nw < min) { nx = startX; nw = startW; }
+          if (nh < min) { ny = startY; nh = startH; }
+          nx = Math.max(0, Math.min(nx, iw - nw));
+          ny = Math.max(0, Math.min(ny, ih - nh));
+          if (nx + nw > iw) nw = iw - nx;
+          if (ny + nh > ih) nh = ih - ny;
         }
 
-        if (newW < minSize) {
-          newX = currentCropRect!.x;
-          newW = currentCropRect!.width;
-        }
-        if (newH < minSize) {
-          newY = currentCropRect!.y;
-          newH = currentCropRect!.height;
-        }
+        cropXSV.value = nx;
+        cropYSV.value = ny;
+        cropWSV.value = nw;
+        cropHSV.value = nh;
+      },
 
-        newX = Math.max(0, Math.min(newX, imageWidth - newW));
-        newY = Math.max(0, Math.min(newY, imageHeight - newH));
-        if (newX + newW > imageWidth) newW = imageWidth - newX;
-        if (newY + newH > imageHeight) newH = imageHeight - newY;
-
-        setCropRect({ x: newX, y: newY, width: newW, height: newH });
+      onPanResponderRelease: () => {
+        // Sync to manager
+        managerCropRect.value = {
+          x: cropXSV.value, y: cropYSV.value,
+          width: cropWSV.value, height: cropHSV.value,
+        };
+        // Trigger auto-zoom after 1 second; grid fades out when zoom finishes
+        triggerZoom();
+      },
+      onPanResponderTerminate: () => {
+        gridOpacitySV.value = withTiming(0, FADE_OUT);
       },
     }),
   ).current;
 
-  const overlayPath = Skia.Path.Make();
-  const gridPath = Skia.Path.Make();
-  const handlesPath = Skia.Path.Make();
-
-  if (cropRect && canvasLayout.height > 0) {
-    const cx = xOffset + cropRect.x / scaleRatio;
-    const cy = yOffset + cropRect.y / scaleRatio;
-    const cw = cropRect.width / scaleRatio;
-    const ch = cropRect.height / scaleRatio;
-
-    overlayPath.addRect(
-      Skia.XYWHRect(0, 0, canvasLayout.width, canvasLayout.height),
-    );
-    overlayPath.addRect(Skia.XYWHRect(cx, cy, cw, ch));
-    overlayPath.setFillType(FillType.EvenOdd);
-
-    const thirdW = cw / 3;
-    const thirdH = ch / 3;
-
-    gridPath.moveTo(cx + thirdW, cy);
-    gridPath.lineTo(cx + thirdW, cy + ch);
-    gridPath.moveTo(cx + thirdW * 2, cy);
-    gridPath.lineTo(cx + thirdW * 2, cy + ch);
-
-    gridPath.moveTo(cx, cy + thirdH);
-    gridPath.lineTo(cx + cw, cy + thirdH);
-    gridPath.moveTo(cx, cy + thirdH * 2);
-    gridPath.lineTo(cx + cw, cy + thirdH * 2);
-
-    gridPath.addRect(Skia.XYWHRect(cx, cy, cw, ch));
-
-    const hl = 20;
-    handlesPath.moveTo(cx, cy + hl);
-    handlesPath.lineTo(cx, cy);
-    handlesPath.lineTo(cx + hl, cy);
-    handlesPath.moveTo(cx + cw - hl, cy);
-    handlesPath.lineTo(cx + cw, cy);
-    handlesPath.lineTo(cx + cw, cy + hl);
-    handlesPath.moveTo(cx, cy + ch - hl);
-    handlesPath.lineTo(cx, cy + ch);
-    handlesPath.lineTo(cx + hl, cy + ch);
-    handlesPath.moveTo(cx + cw - hl, cy + ch);
-    handlesPath.lineTo(cx + cw, cy + ch);
-    handlesPath.lineTo(cx + cw, cy + ch - hl);
-  }
+  // ─── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <View style={styles.container}>
-      <View
-        style={styles.canvasContainer}
-        onLayout={onLayout}
-        {...panResponder.panHandlers}
-      >
+
+      <Animated.View style={[styles.canvasContainer, zoomStyle]} onLayout={onLayout} {...panResponder.panHandlers}>
         {canvasLayout.height > 0 && (
           <Canvas
             style={{ width: canvasLayout.width, height: canvasLayout.height }}
             pointerEvents="none"
           >
             <Group
-              origin={{
-                x: xOffset + drawWidth / 2,
-                y: yOffset + drawHeight / 2,
-              }}
+              origin={{ x: xOffset + drawWidth / 2, y: yOffset + drawHeight / 2 }}
               transform={transform}
             >
               <Image
@@ -372,326 +435,141 @@ export const Cropper = ({ stateManager }: CropperProps) => {
                 fit="contain"
               />
             </Group>
-            {cropRect && (
-              <>
-                <Path path={overlayPath} color="rgba(0, 0, 0, 0.6)" />
-                <Path
-                  path={gridPath}
-                  color="rgba(255, 255, 255, 0.5)"
-                  style="stroke"
-                  strokeWidth={1}
-                />
-                <Path
-                  path={handlesPath}
-                  color="white"
-                  style="stroke"
-                  strokeWidth={4}
-                  strokeJoin="round"
-                  strokeCap="round"
-                />
-              </>
-            )}
+
+            {/* Semi-transparent overlay outside crop — rgba(0,0,0,0.6) */}
+            <Path path={overlayPath} color="rgba(0,0,0,0.6)" />
+
+            {/* Rule-of-thirds grid — visible during gesture, fades after zoom */}
+            <Group opacity={gridOpacitySV}>
+              <Path path={gridPath} color="rgba(255,255,255,0.4)" style="stroke" strokeWidth={0.7} />
+            </Group>
+
+            {/* L-shaped corner handles */}
+            <Path path={handlesPath} color="#FFF" style="stroke" strokeWidth={3} strokeJoin="round" strokeCap="round" />
           </Canvas>
         )}
-      </View>
+      </Animated.View>
 
-      {/* Apple Style Toolbar */}
-      <View style={styles.ratioListContainer}>
+      <View style={styles.controls}>
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.ratioList}
+          style={styles.ratioStrip}
         >
-          {RATIOS.map((ratio) => (
-            <TouchableOpacity key={ratio} onPress={() => setActiveRatio(ratio)}>
-              <Text
-                style={[
-                  styles.ratioText,
-                  activeRatio === ratio && styles.activeRatioText,
-                ]}
-              >
-                {ratio}
-              </Text>
+          {RATIOS.map(r => (
+            <TouchableOpacity key={r} onPress={() => { setActiveRatio(r); applyRatio(r, isLandscape); }}>
+              <Text style={[styles.ratioText, activeRatio === r && styles.ratioTextActive]}>{r}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
-      </View>
 
-      {/* Perspective Tools */}
-      <View style={styles.perspectiveToolbar}>
-        <TouchableOpacity
-          style={styles.toolBtn}
-          onPress={() => setSelectedTool("straighten")}
-        >
-          <View
-            style={[
-              styles.toolIconCircle,
-              selectedTool === "straighten" && styles.activeToolCircle,
-            ]}
-          >
-            <View style={styles.straightenLine} />
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.toolBtn}
-          onPress={() => setSelectedTool("vertical")}
-        >
-          <View
-            style={[
-              styles.trapezoidV,
-              selectedTool === "vertical" && styles.activeToolTrapezoid,
-            ]}
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.toolBtn}
-          onPress={() => setSelectedTool("horizontal")}
-        >
-          <View
-            style={[
-              styles.trapezoidH,
-              selectedTool === "horizontal" && styles.activeToolTrapezoid,
-            ]}
-          />
-        </TouchableOpacity>
-      </View>
-
-      <RulerDial
-        value={
-          selectedTool === "straighten"
-            ? straighten
-            : selectedTool === "vertical"
-              ? vPerspective
-              : hPerspective
-        }
-        min={-45}
-        max={45}
-        onChange={(val) => {
-          if (selectedTool === "straighten") setStraighten(val);
-          else if (selectedTool === "vertical") setVPerspective(val);
-          else setHPerspective(val);
-        }}
-      />
-
-      <View style={styles.orientationToolbar}>
-        <View style={styles.orientationToggles}>
-          <TouchableOpacity
-            style={[
-              styles.orientationBtn,
-              !isLandscape && styles.activeOrientationBtn,
-            ]}
-            onPress={() => setIsLandscape(false)}
-          >
-            <View style={styles.rectPortrait} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.orientationBtn,
-              isLandscape && styles.activeOrientationBtn,
-            ]}
-            onPress={() => setIsLandscape(true)}
-          >
-            <View style={styles.rectLandscape} />
-          </TouchableOpacity>
+        <View style={styles.toolRow}>
+          {(["straighten", "vertical", "horizontal"] as const).map((tool, idx) => (
+            <TouchableOpacity
+              key={tool}
+              style={[styles.toolBtn, selectedTool === tool && styles.toolBtnActive]}
+              onPress={() => { setSelectedTool(tool); selectedToolSV.value = idx; }}
+            >
+              {tool === "straighten" && <StraightenIcon  active={selectedTool === tool} />}
+              {tool === "vertical"   && <VerticalIcon    active={selectedTool === tool} />}
+              {tool === "horizontal" && <HorizontalIcon  active={selectedTool === tool} />}
+            </TouchableOpacity>
+          ))}
         </View>
-        <TouchableOpacity style={styles.lockBtn}>
-          <Text style={styles.lockIcon}>🔓</Text>
-        </TouchableOpacity>
+
+        <AnimatedTextInput
+          animatedProps={dialLabelProps}
+          editable={false}
+          style={styles.dialLabel}
+        />
+
+        <RulerDial
+          value={activeDialSV.value}
+          min={-45}
+          max={45}
+          onChange={handleDialChange}
+        />
+
       </View>
+
     </View>
   );
 };
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+const ICON_SIZE = 26;
+
+const StraightenIcon = ({ active }: { active: boolean }) => {
+  const c = active ? "#FFD60A" : "#888";
+  return (
+    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+      <Path path={`M3 ${ICON_SIZE/2} L${ICON_SIZE-3} ${ICON_SIZE/2}`} style="stroke" strokeWidth={2} color={c} strokeCap="round" />
+      <Path path={`M${ICON_SIZE/2} ${ICON_SIZE/2} L${ICON_SIZE/2+5} ${ICON_SIZE/2-6}`} style="stroke" strokeWidth={2} color={c} strokeCap="round" />
+    </Canvas>
+  );
+};
+
+const VerticalIcon = ({ active }: { active: boolean }) => {
+  const c = active ? "#FFD60A" : "#888";
+  return (
+    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+      <Path
+        path={`M6 3 L${ICON_SIZE-6} 3 L${ICON_SIZE-2} ${ICON_SIZE-3} L2 ${ICON_SIZE-3} Z`}
+        style="stroke" strokeWidth={1.8} color={c} strokeJoin="round"
+      />
+    </Canvas>
+  );
+};
+
+const HorizontalIcon = ({ active }: { active: boolean }) => {
+  const c = active ? "#FFD60A" : "#888";
+  return (
+    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+      <Path
+        path={`M3 6 L3 ${ICON_SIZE-6} L${ICON_SIZE-3} ${ICON_SIZE-2} L${ICON_SIZE-3} 2 Z`}
+        style="stroke" strokeWidth={1.8} color={c} strokeJoin="round"
+      />
+    </Canvas>
+  );
+};
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  canvasContainer: { flex: 1, overflow: 'hidden' },
-  controls: {
-    height: 160,
-    backgroundColor: '#000',
-    paddingTop: 10,
-  },
-  ratioListContainer: {
-    paddingVertical: 15,
-  },
+  container:       { flex: 1, backgroundColor: "#000" },
+  canvasContainer: { flex: 1, overflow: "hidden" },
+  controls:        { backgroundColor: "#000", paddingBottom: 8 },
+
+  ratioStrip: { height: 48 },
   ratioList: {
+    height: 48,
     paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 24,
+  },
+  ratioText:       { color: "#555",    fontSize: 12, fontWeight: "600" },
+  ratioTextActive: { color: "#FFD60A" },
+
+  toolRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 20,
-  },
-  ratioText: {
-    color: '#8E8E93',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  activeRatioText: {
-    color: '#FFD60A',
-  },
-  orientationToolbar: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 10,
-    position: 'relative',
-  },
-  orientationToggles: {
-    flexDirection: 'row',
-    backgroundColor: '#1C1C1E',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  orientationBtn: {
-    padding: 10,
-    backgroundColor: '#1C1C1E',
-  },
-  activeOrientationBtn: {
-    backgroundColor: '#333336',
-  },
-  rectPortrait: {
-    width: 14,
-    height: 20,
-    borderWidth: 1.5,
-    borderColor: '#FFF',
-    borderRadius: 2,
-  },
-  rectLandscape: {
-    width: 20,
-    height: 14,
-    borderWidth: 1.5,
-    borderColor: '#FFF',
-    borderRadius: 2,
-  },
-  lockBtn: {
-    position: 'absolute',
-    right: 20,
-    padding: 8,
-    backgroundColor: '#1C1C1E',
-    borderRadius: 20,
-  },
-  lockIcon: {
-    fontSize: 16,
-  },
-  perspectiveToolbar: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 20,
-    paddingVertical: 10,
+    paddingBottom: 8,
   },
   toolBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1C1C1E',
+    width: 44, height: 44, borderRadius: 22,
+    justifyContent: "center", alignItems: "center",
+    backgroundColor: "#1C1C1E",
   },
-  activeToolBtn: {
-    backgroundColor: '#333',
-  },
-  toolIconCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#8E8E93',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  activeToolCircle: {
-    borderColor: '#FFD60A',
-  },
-  straightenLine: {
-    width: 18,
-    height: 1.5,
-    backgroundColor: '#8E8E93',
-  },
-  trapezoidV: {
-    width: 18,
-    height: 18,
-    borderTopWidth: 2,
-    borderBottomWidth: 2,
-    borderLeftWidth: 4,
-    borderRightWidth: 4,
-    borderColor: '#8E8E93',
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-  },
-  trapezoidH: {
-    width: 18,
-    height: 18,
-    borderLeftWidth: 2,
-    borderRightWidth: 2,
-    borderTopWidth: 4,
-    borderBottomWidth: 4,
-    borderColor: '#8E8E93',
-    borderTopColor: 'transparent',
-    borderBottomColor: 'transparent',
-  },
-  activeToolTrapezoid: {
-    borderColor: '#FFD60A',
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-  },
-  dialWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  valueBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: '#333',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  valueText: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  dialContainer: {
-    height: 50,
-    width: SCREEN_WIDTH,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  dialTicksContainer: {
-    width: SCREEN_WIDTH,
-    alignItems: 'center',
-  },
-  dialTicks: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dialIndicator: {
-    width: 2,
-    height: 20,
-    backgroundColor: '#FFD60A',
-    position: 'absolute',
-    top: 15,
-  },
-  tick: {
-    width: 1,
-    backgroundColor: '#333',
-    marginHorizontal: 3,
-  },
-  tickMinor: {
-    height: 8,
-  },
-  tickMajor: {
-    height: 14,
-    backgroundColor: '#666',
-  },
-  tickCenter: {
-    height: 20,
-    backgroundColor: '#FFD60A',
-    width: 2,
+  toolBtnActive: { backgroundColor: "#2C2C2E" },
+
+  dialLabel: {
+    color: "#FFF", fontSize: 11, fontWeight: "700",
+    letterSpacing: 1.2, textAlign: "center", marginBottom: 4,
   },
 });
