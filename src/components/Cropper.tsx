@@ -15,6 +15,7 @@ interface CropperProps {
 const RATIOS = ['ORIGINAL', 'FREEFORM', 'SQUARE', '9:16', '4:5', '5:7', '3:4', '3:5', '2:3'];
 
 import { RulerDial } from "./RulerDial";
+import { ToolButton } from "./ToolButton";
 import { useDerivedValue } from "react-native-reanimated";
 
 export const Cropper = ({ stateManager }: CropperProps) => {
@@ -419,52 +420,52 @@ export const Cropper = ({ stateManager }: CropperProps) => {
 
       {/* Perspective Tools */}
       <View style={styles.perspectiveToolbar}>
-        <TouchableOpacity
-          style={[
-            styles.toolBtn,
-            selectedTool === "straighten" && styles.activeToolBtn,
-          ]}
+        <ToolButton
+          isActive={selectedTool === "straighten"}
+          toolValue={straighten}
           onPress={() => setSelectedTool("straighten")}
-        >
-          <View
-            style={[
-              styles.toolIconCircle,
-              selectedTool === "straighten" && styles.activeToolCircle,
-            ]}
-          >
-            <View style={styles.straightenLine} />
-          </View>
-        </TouchableOpacity>
+          max={45}
+          icon={
+            <View
+              style={[
+                styles.toolIconCircle,
+                selectedTool === "straighten" && styles.activeToolCircle,
+              ]}
+            >
+              <View style={styles.straightenLine} />
+            </View>
+          }
+        />
 
-        <TouchableOpacity
-          style={[
-            styles.toolBtn,
-            selectedTool === "vertical" && styles.activeToolBtn,
-          ]}
+        <ToolButton
+          isActive={selectedTool === "vertical"}
+          toolValue={vPerspective}
           onPress={() => setSelectedTool("vertical")}
-        >
-          <View
-            style={[
-              styles.trapezoidV,
-              selectedTool === "vertical" && styles.activeToolTrapezoid,
-            ]}
-          />
-        </TouchableOpacity>
+          max={45}
+          icon={
+            <View
+              style={[
+                styles.trapezoidV,
+                selectedTool === "vertical" && styles.activeToolTrapezoid,
+              ]}
+            />
+          }
+        />
 
-        <TouchableOpacity
-          style={[
-            styles.toolBtn,
-            selectedTool === "horizontal" && styles.activeToolBtn,
-          ]}
+        <ToolButton
+          isActive={selectedTool === "horizontal"}
+          toolValue={hPerspective}
           onPress={() => setSelectedTool("horizontal")}
-        >
-          <View
-            style={[
-              styles.trapezoidH,
-              selectedTool === "horizontal" && styles.activeToolTrapezoid,
-            ]}
-          />
-        </TouchableOpacity>
+          max={45}
+          icon={
+            <View
+              style={[
+                styles.trapezoidH,
+                selectedTool === "horizontal" && styles.activeToolTrapezoid,
+              ]}
+            />
+          }
+        />
       </View>
 
       <RulerDial

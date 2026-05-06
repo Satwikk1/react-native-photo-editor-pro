@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { SkiaIcon } from './SkiaIcon';
 
 interface EditorHeaderProps {
   activeTab: string;
@@ -46,7 +47,7 @@ export const EditorHeader = ({
             onPress={onEdit}
             style={localStyles.pencilBtnHeader}
           >
-            <Text style={localStyles.pencilIconText}>✎</Text>
+            <SkiaIcon name="PENCIL" color="#FFF" size={14} />
           </TouchableOpacity>
           <TouchableOpacity onPress={onSave} style={[localStyles.doneBtn, { backgroundColor: primaryColor }]}>
             <Text style={localStyles.doneBtnText}>Done</Text>

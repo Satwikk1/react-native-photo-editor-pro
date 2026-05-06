@@ -1,14 +1,15 @@
-import React, { useEffect, useMemo } from 'react';
+import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { 
   Canvas, 
   Circle, 
 } from '@shopify/react-native-skia';
+import { SkiaIcon, IconName } from './SkiaIcon';
 
 interface TabButtonProps {
   id: "adjust" | "filter" | "crop";
   label: string;
-  icon: string;
+  icon: IconName;
   activeTab: string;
   onPress: (id: "adjust" | "filter" | "crop") => void;
   theme?: {
@@ -43,16 +44,13 @@ export const TabButton = ({ id, label, icon, activeTab, onPress, theme }: TabBut
             />
           )}
         </Canvas>
-        <Text style={[
-          localStyles.tabIcon, 
-          { 
-            color: isActive ? '#FFFFFF' : INACTIVE_COLOR, 
-            lineHeight: 40,
-            width: 40,
-          }
-        ]}>
-          {icon}
-        </Text>
+        <View style={localStyles.tabIconWrapper}>
+          <SkiaIcon 
+            name={icon} 
+            color={isActive ? '#FFFFFF' : INACTIVE_COLOR} 
+            size={24} 
+          />
+        </View>
       </View>
       
       <Text style={[
@@ -71,10 +69,11 @@ const localStyles = StyleSheet.create({
     justifyContent: "center",
     width: 80,
   },
-  tabIcon: {
-    fontSize: 24,
-    textAlign: 'center',
-    includeFontPadding: false,
+  tabIconWrapper: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   tabText: {
     fontSize: 11,

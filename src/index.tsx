@@ -89,7 +89,7 @@ export const PhotoEditor = ({
           <TabButton
             id="adjust"
             label="Adjust"
-            icon="❂"
+            icon="ADJUST"
             activeTab={activeTab}
             onPress={setActiveTab}
             theme={theme}
@@ -97,7 +97,7 @@ export const PhotoEditor = ({
           <TabButton
             id="filter"
             label="Filters"
-            icon="◎"
+            icon="FILTER"
             activeTab={activeTab}
             onPress={setActiveTab}
             theme={theme}
@@ -105,7 +105,7 @@ export const PhotoEditor = ({
           <TabButton
             id="crop"
             label="Crop"
-            icon="◰"
+            icon="CROP"
             activeTab={activeTab}
             onPress={setActiveTab}
             theme={theme}
