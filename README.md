@@ -2,12 +2,18 @@
 
 A professional-grade, high-performance photo editor for React Native, powered by **React Native Skia** and **Reanimated**.
 
+## Demo
+
+![Photo Editor Pro Demo - Adjustments](./assets/adjust.gif)
+![Photo Editor Pro Demo - Filter and Crop](./assets/filter%20and%20crop.gif)
+
 ## Features
 
-- 🎨 **Pro Filters**: Real-time brightness, contrast, and saturation adjustments using Skia shaders.
-- ✂️ **Advanced Cropping**: Pan, zoom, and aspect ratio presets (1:1, 4:5, 16:9, etc.).
-- ✍️ **Drawing Board**: Smooth freehand drawing with hardware-accelerated rendering.
-- 🚀 **High-Res Export**: Capture your edits at full resolution using Skia's offscreen rendering.
+- 🎨 **Pro Adjustments**: Real-time Exposure, Brilliance, Highlights, Shadows, Contrast, and more using 4x5 Color Matrices and Skia Shaders.
+- ✂️ **Geometric Transform**: Advanced crop with 3D Pitch/Yaw perspective, rotation, and flipping.
+- ✍️ **Markup & Drawing**: Smooth, hardware-accelerated freehand drawing with customizable brushes.
+- 🚀 **Full-Res Export**: High-fidelity base64 export at the original image resolution, bypassing the bridge for maximum speed.
+- 📱 **Native Feel**: iOS-inspired UI with haptic-ready slider feedback and smooth Reanimated transitions.
 
 ## Installation
 
