@@ -1,6 +1,6 @@
 {
   "name": "react-native-photo-editor-pro",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A high-performance photo editor for React Native using Skia",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -46,13 +46,13 @@
     "cropping",
     "markup"
   ],
-  "repository": "https://github.com/satwikk/react-native-photo-editor-pro",
+  "repository": "https://github.com/Satwikk1/react-native-photo-editor-pro",
   "author": "Satwikk <satwikk@example.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/satwikk/react-native-photo-editor-pro/issues"
+    "url": "https://github.com/Satwikk1/react-native-photo-editor-pro/issues"
   },
-  "homepage": "https://github.com/satwikk/react-native-photo-editor-pro#readme",
+  "homepage": "https://github.com/Satwikk1/react-native-photo-editor-pro#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },

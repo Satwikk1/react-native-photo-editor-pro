@@ -4,8 +4,8 @@ A professional-grade, high-performance photo editor for React Native, powered by
 
 ## Demo
 
-![Photo Editor Pro Demo - Adjustments](./assets/adjust.gif)
-![Photo Editor Pro Demo - Filter and Crop](./assets/filter%20and%20crop.gif)
+![Photo Editor Pro Demo - Adjustments](https://raw.githubusercontent.com/Satwikk1/react-native-photo-editor-pro/main/assets/adjust.gif)
+![Photo Editor Pro Demo - Filter and Crop](https://raw.githubusercontent.com/Satwikk1/react-native-photo-editor-pro/main/assets/filter%20and%20crop.gif)
 
 ## Features
 
