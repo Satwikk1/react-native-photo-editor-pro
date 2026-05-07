@@ -122,7 +122,7 @@ export const RulerDial = ({
   return (
     <View style={styles.dialContainer} {...panResponder.panHandlers}>
       <View style={styles.gestureSurface}>
-        <Canvas style={styles.canvas}>
+        <Canvas style={styles.canvas} pointerEvents="none">
           {/* Ticks Group */}
           <Group transform={ticksTransform}>
             {Array.from({ length: TICK_COUNT }).map((_, i) => {

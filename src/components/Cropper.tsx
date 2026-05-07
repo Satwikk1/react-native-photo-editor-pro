@@ -748,7 +748,7 @@ const ICON_SIZE = 26;
 const StraightenIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; primaryColor?: string }) => {
   const c = active ? primaryColor : "#888";
   return (
-    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }} pointerEvents="none">
       <Path
         path={`M3 ${ICON_SIZE / 2} L${ICON_SIZE - 3} ${ICON_SIZE / 2}`}
         style="stroke"
@@ -770,7 +770,7 @@ const StraightenIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean;
 const VerticalIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; primaryColor?: string }) => {
   const c = active ? primaryColor : "#888";
   return (
-    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }} pointerEvents="none">
       <Path
         path={`M6 3 L${ICON_SIZE - 6} 3 L${ICON_SIZE - 2} ${ICON_SIZE - 3} L2 ${ICON_SIZE - 3} Z`}
         style="stroke"
@@ -785,7 +785,7 @@ const VerticalIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; p
 const HorizontalIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; primaryColor?: string }) => {
   const c = active ? primaryColor : "#888";
   return (
-    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+    <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }} pointerEvents="none">
       <Path
         path={`M3 6 L3 ${ICON_SIZE - 6} L${ICON_SIZE - 3} ${ICON_SIZE - 2} L${ICON_SIZE - 3} 2 Z`}
         style="stroke"

@@ -114,7 +114,7 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
   return (
     <View style={styles.container}>
       <View style={styles.canvasContainer} onLayout={onCanvasLayout}>
-        <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }}>
+        <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }} pointerEvents="none">
           <Group
             origin={{ x: xOffset + drawWidth / 2, y: yOffset + drawHeight / 2 }}
             transform={imageTransform}
