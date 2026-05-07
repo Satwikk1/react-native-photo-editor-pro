@@ -81,8 +81,8 @@ export const PhotoEditor = ({
             theme={theme}
             onCancel={() => setActiveTab("crop")}
             onDone={() => {
-              const result = stateManager.generateFinalImage();
-              if (result && onSave) onSave(result);
+              stateManager.commitPaths();
+              setActiveTab("adjust");
             }}
           />
         )}

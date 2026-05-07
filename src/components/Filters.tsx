@@ -17,7 +17,7 @@ import Animated, {
   withTiming,
   Easing,
 } from "react-native-reanimated";
-import { Canvas, ColorMatrix, Group, Image, RuntimeShader } from "@shopify/react-native-skia";
+import { Canvas, ColorMatrix, Group, Image, RuntimeShader, Path } from "@shopify/react-native-skia";
 
 import type { EditorStateManager } from "../state/EditorStateManager";
 import { FilterThumbnail } from "./FilterThumbnail";
@@ -166,6 +166,26 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
                   ? <RuntimeShader source={activeFilter.effect} uniforms={shaderUniforms} />
                   : <ColorMatrix matrix={blendedMatrix} />
                 }
+                
+                {/* Markup Layer — Render normalized vector paths */}
+                <Group 
+                  transform={[
+                    { scaleX: drawWidth }, 
+                    { scaleY: drawHeight }
+                  ]}
+                >
+                  {stateManager.paths.value.map((p, idx) => (
+                    <Path
+                      key={idx}
+                      path={p.path}
+                      style="stroke"
+                      strokeWidth={p.width / drawWidth}
+                      color={p.color}
+                      strokeCap="round"
+                      strokeJoin="round"
+                    />
+                  ))}
+                </Group>
               </Image>
             </Group>
           </Group>
