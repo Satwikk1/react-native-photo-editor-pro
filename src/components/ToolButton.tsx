@@ -24,7 +24,7 @@ const CircularProgress = ({ value, max, color }: { value: SharedValue<number>; m
 
   return (
     <View style={styles.canvasOverlay} pointerEvents="none">
-      <Canvas style={{ flex: 1 }}>
+      <Canvas style={{ flex: 1 }} pointerEvents="none">
         <Path path={path} style="stroke" strokeWidth={strokeWidth} color={color} strokeCap="round" />
       </Canvas>
     </View>

@@ -33,7 +33,7 @@ export const TabButton = ({ id, label, icon, activeTab, onPress, theme }: TabBut
       onPress={() => onPress(id)}
     >
       <View style={localStyles.iconContainer}>
-        <Canvas style={localStyles.bgCanvas}>
+        <Canvas style={localStyles.bgCanvas} pointerEvents="none">
           {isActive && (
             <Circle
               cx={20}

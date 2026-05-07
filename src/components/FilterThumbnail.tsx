@@ -23,7 +23,7 @@ export const FilterThumbnail = ({ image, filter, isActive, onPress, primaryColor
     <View style={styles.wrapper}>
       {/* Canvas — borderRadius + overflow clipping lives on the Canvas itself
           because Skia canvases don't honour a parent View's overflow:hidden. */}
-      <Canvas style={styles.canvas}>
+      <Canvas style={styles.canvas} pointerEvents="none">
         <Image image={image} x={0} y={0} width={THUMB_W} height={THUMB_H} fit="cover">
           {filter.effect
             ? <RuntimeShader source={filter.effect} uniforms={{ intensity: 1.0 }} />

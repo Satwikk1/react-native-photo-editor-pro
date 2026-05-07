@@ -98,7 +98,7 @@ export const SkiaIcon = ({ name, color, size = 24 }: SkiaIconProps) => {
   const isFill = FILLED_ICONS.has(name);
 
   return (
-    <Canvas style={{ width: size, height: size }}>
+    <Canvas style={{ width: size, height: size }} pointerEvents="none">
       <Group transform={[{ scale }]}>
         <Path
           path={pathData}
