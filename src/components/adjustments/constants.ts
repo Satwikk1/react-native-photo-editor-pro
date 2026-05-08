@@ -93,6 +93,8 @@ export const TOOL_STATE_CONFIG: Record<AdjustTool, ToolStateConfig> = {
 
 const MASTER_SKSL = `
   uniform shader image;
+  uniform float4x4 colorMatrix;
+  uniform float4 colorOffset;
   uniform float vibrance;
   uniform float shadows;
   uniform float highlights;
@@ -104,28 +106,48 @@ const MASTER_SKSL = `
   uniform float2 canvasSize;
 
   vec4 main(vec2 coord) {
-    // 1. Noise Reduction — 9-tap box blur. Must run before sharpening so we
-    //    denoise the signal first, then re-introduce controlled detail.
-    //    nr=0 → mix weight=0 → pure passthrough, no extra samples matter.
-    float nr = noiseReduction * 2.0;
-    vec4 blurredNR = (
-      image.eval(coord + vec2(-nr, -nr)) + image.eval(coord + vec2(0.0, -nr)) + image.eval(coord + vec2(nr, -nr)) +
-      image.eval(coord + vec2(-nr,  0.0)) + image.eval(coord)                + image.eval(coord + vec2(nr,  0.0)) +
-      image.eval(coord + vec2(-nr,  nr))  + image.eval(coord + vec2(0.0,  nr)) + image.eval(coord + vec2(nr,  nr))
-    ) / 9.0;
-    vec4 c = mix(image.eval(coord), blurredNR, noiseReduction);
+    // 0. Linear Corrections (Color Matrix)
+    // Apply exposure, contrast, saturation, warmth, etc. before non-linear ops.
+    vec4 c = image.eval(coord);
+    c = colorMatrix * c + colorOffset;
+    c = clamp(c, 0.0, 1.0);
 
-    // 2. Sharpness — tight unsharp mask (1 px radius, high gain).
+    // 1. Noise Reduction — resolution-aware box blur.
+    // Calculate a sampling radius that scales with the image resolution.
+    // We target a ~1px radius at 1000px width.
+    float resScale = canvasSize.x / 1000.0;
+    float nr = noiseReduction * 2.0 * resScale;
+
+    vec4 blurredNR = (
+      (colorMatrix * image.eval(coord + vec2(-nr, -nr)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(0.0, -nr)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(nr, -nr))  + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(-nr,  0.0)) + colorOffset) +
+      c +
+      (colorMatrix * image.eval(coord + vec2(nr,  0.0)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(-nr,  nr))  + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(0.0,  nr)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(nr,  nr))  + colorOffset)
+    ) / 9.0;
+    c = mix(c, blurredNR, noiseReduction);
+
+    // 2. Sharpness — unsharp mask with resolution-aware radius.
+    float sRadius = 1.0 * resScale;
     vec4 blurredS = (
-      image.eval(coord + vec2(-1.0, 0.0)) + image.eval(coord + vec2(1.0, 0.0)) +
-      image.eval(coord + vec2(0.0, -1.0)) + image.eval(coord + vec2(0.0, 1.0))
+      (colorMatrix * image.eval(coord + vec2(-sRadius, 0.0)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(sRadius, 0.0))  + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(0.0, -sRadius)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(0.0, sRadius))  + colorOffset)
     ) / 4.0;
     c.rgb += (c.rgb - blurredS.rgb) * sharpness * 3.0;
 
-    // 3. Definition — clarity via wider unsharp mask (2 px catches mid-frequency).
+    // 3. Definition — wider unsharp mask.
+    float dRadius = 2.0 * resScale;
     vec4 blurredDef = (
-      image.eval(coord + vec2(-2.0, 0.0)) + image.eval(coord + vec2(2.0, 0.0)) +
-      image.eval(coord + vec2(0.0, -2.0)) + image.eval(coord + vec2(0.0, 2.0))
+      (colorMatrix * image.eval(coord + vec2(-dRadius, 0.0)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(dRadius, 0.0))  + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(0.0, -dRadius)) + colorOffset) +
+      (colorMatrix * image.eval(coord + vec2(0.0, dRadius))  + colorOffset)
     ) / 4.0;
     c.rgb += (c.rgb - blurredDef.rgb) * definition * 2.0;
 
@@ -171,3 +193,17 @@ const MASTER_SKSL = `
 `;
 
 export const masterShaderEffect = Skia.RuntimeEffect.Make(MASTER_SKSL)!;
+
+const FILTER_SKSL = `
+  uniform shader image;
+  uniform float4 fMat0, fMat1, fMat2, fMat3, fMat4;
+  vec4 main(vec2 coord) {
+    vec4 c = image.eval(coord);
+    float r = dot(c, fMat0) + fMat4.r;
+    float g = dot(c, fMat1) + fMat4.g;
+    float b = dot(c, fMat2) + fMat4.b;
+    float a = dot(c, fMat3) + fMat4.a;
+    return vec4(r, g, b, a);
+  }
+`;
+export const filterMatrixEffect = Skia.RuntimeEffect.Make(FILTER_SKSL)!;

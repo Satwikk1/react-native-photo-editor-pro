@@ -10,10 +10,12 @@ import {
   StrokeCap,
   StrokeJoin,
 } from "@shopify/react-native-skia";
-import { masterShaderEffect } from "../components/adjustments/constants";
+import { masterShaderEffect, filterMatrixEffect } from "../components/adjustments/constants";
 import { Dimensions } from "react-native";
 import { makeMutable, SharedValue } from "react-native-reanimated";
 import type { AutoTargets } from "../components/adjustments/autoEnhance";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 export interface CropRect {
   x: number;
@@ -53,9 +55,12 @@ export interface EditorState {
   autoContrastTarget: number;
   autoWarmthTarget: number;
   autoSaturationTarget: number;
+  filterMatrix: number[] | null;
+  filterIntensity: number;
+  filterId: string | null;
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
 
 export class EditorStateManager {
   // Processing values (Normalized for Skia)
@@ -101,7 +106,16 @@ export class EditorStateManager {
   public autoWarmthTarget: SharedValue<number>; // neutral 0.0
   public autoSaturationTarget: SharedValue<number>; // neutral 1.0
 
+  // Filter State
+  public filterMatrix: SharedValue<number[] | null>;
+  public filterIntensity: SharedValue<number>;
+  public filterEffect: SharedValue<any | null>; // Using any to avoid complex Skia types in mutable
+  public filterId: SharedValue<string | null>;
+
   public rotation: SharedValue<number>;
+  public straighten: SharedValue<number>;
+  public pitch: SharedValue<number>;
+  public yaw: SharedValue<number>;
   public flipX: SharedValue<number>;
   public cropRect: SharedValue<CropRect | null>;
   public paths: SharedValue<DrawingPath[]>;
@@ -151,7 +165,15 @@ export class EditorStateManager {
     this.autoWarmthTarget = makeMutable(0.0);
     this.autoSaturationTarget = makeMutable(1.0);
 
+    this.filterMatrix = makeMutable<number[] | null>(null);
+    this.filterIntensity = makeMutable(100);
+    this.filterEffect = makeMutable<any | null>(null);
+    this.filterId = makeMutable<string | null>("original");
+
     this.rotation = makeMutable(0);
+    this.straighten = makeMutable(0);
+    this.pitch = makeMutable(0);
+    this.yaw = makeMutable(0);
     this.flipX = makeMutable(1);
     this.cropRect = makeMutable<CropRect | null>(null);
     this.paths = makeMutable<DrawingPath[]>([]);
@@ -170,12 +192,34 @@ export class EditorStateManager {
   flip() {
     this.flipX.value = this.flipX.value === 1 ? -1 : 1;
   }
+  public setFilter(id: string, matrix: number[] | null, effect: any | null, intensity: number) {
+    this.filterId.value = id;
+    this.filterMatrix.value = matrix;
+    this.filterEffect.value = effect;
+    this.filterIntensity.value = intensity;
+  }
+
+  public setFilterIntensity(intensity: number) {
+    this.filterIntensity.value = intensity;
+  }
+
+  private blendFilterMatrix(matrix: number[], t: number): number[] {
+    const id = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
+    const out: number[] = [];
+    const alpha = t / 100;
+    for (let i = 0; i < matrix.length; i++) {
+      out.push(id[i] + (matrix[i] - id[i]) * alpha);
+    }
+    return out;
+  }
 
   // Bakes rotation + flip + perspective + crop into a new originalImage.
   // pitch/yaw in radians. Resets all geometric state after.
-  commitCrop(pitch = 0, yaw = 0): void {
+  commitCrop(): void {
     const img = this.originalImage;
-    const rot = this.rotation.value; // degrees (already includes straighten)
+    const rot = this.rotation.value + this.straighten.value;
+    const pitch = this.pitch.value * Math.PI / 180;
+    const yaw = this.yaw.value * Math.PI / 180;
     const fx = this.flipX.value;
     const cr = this.cropRect.value;
     const w = img.width(),
@@ -184,7 +228,6 @@ export class EditorStateManager {
       cy = h / 2;
 
     // Perspective distance scaled to image pixel space.
-    // 700px was calibrated for ~SCREEN_WIDTH display; scale proportionally.
     const d = 700 * (w / SCREEN_WIDTH);
 
     // Auto-scale — same formula as the UI worklet so no black corners.
@@ -195,9 +238,8 @@ export class EditorStateManager {
       (w * cosT + h * sinT) / w,
       (w * sinT + h * cosT) / h,
     );
-    const pitchScale =
-      Math.abs(pitch) > 0.001 ? 1 / Math.cos(Math.abs(pitch)) : 1;
-    const yawScale = Math.abs(yaw) > 0.001 ? 1 / Math.cos(Math.abs(yaw)) : 1;
+    const pitchScale = Math.abs(pitch) > 0.001 ? 1 / Math.cos(Math.abs(pitch)) : 1;
+    const yawScale   = Math.abs(yaw)   > 0.001 ? 1 / Math.cos(Math.abs(yaw))   : 1;
     const s = straightenScale * pitchScale * yawScale;
 
     // ── Step 1: bake all transforms into a full-size surface ──────────────────
@@ -277,6 +319,9 @@ export class EditorStateManager {
     this.originalImage = committed;
     this.cropRect.value = null;
     this.rotation.value = 0;
+    this.straighten.value = 0;
+    this.pitch.value = 0;
+    this.yaw.value = 0;
     this.flipX.value = 1;
     this.paths.value = []; // Clear paths as they are now baked into the image
   }
@@ -353,6 +398,12 @@ export class EditorStateManager {
       autoContrastTarget: this.autoContrastTarget.value,
       autoWarmthTarget: this.autoWarmthTarget.value,
       autoSaturationTarget: this.autoSaturationTarget.value,
+      filterMatrix: this.filterMatrix.value,
+      filterIntensity: this.filterIntensity.value,
+      filterId: this.filterId.value,
+      straighten: this.straighten.value,
+      pitch: this.pitch.value,
+      yaw: this.yaw.value,
     };
   }
 
@@ -440,70 +491,177 @@ export class EditorStateManager {
       ? Math.round(state.cropRect.height)
       : image.height();
 
-    const surface = Skia.Surface.Make(exportW, exportH);
-    if (!surface) return null;
-    const canvas = surface.getCanvas();
+    let step = "Initialize Surface";
+    try {
+      const surface = Skia.Surface.Make(exportW, exportH);
+      if (!surface) return null;
+      const canvas = surface.getCanvas();
 
-    // Pack uniforms in the order they appear in MASTER_SKSL:
-    // vibrance, shadows, highlights, brilliance, vignette, sharpness, definition, noiseReduction, canvasSize[2]
+      step = "Prepare Matrix";
+
+    // 1. Prepare Uniforms
+    const matrix = this.calculateMatrix(state);
+    const m4x4 = [
+      matrix[0], matrix[1], matrix[2], matrix[3],
+      matrix[5], matrix[6], matrix[7], matrix[8],
+      matrix[10], matrix[11], matrix[12], matrix[13],
+      matrix[15], matrix[16], matrix[17], matrix[18],
+    ];
+    const offset = [matrix[4], matrix[9], matrix[14], matrix[19]];
+    
     const uniforms = [
-      state.vibrance - 1.0,
-      state.shadows,
-      state.highlights,
-      state.brilliance,
-      state.vignette,
-      state.sharpness,
-      state.definition,
-      state.noiseReduction,
-      image.width(),
-      image.height(),
+      ...m4x4, // 16
+      ...offset, // 4
+      state.vibrance - 1.0, // 1
+      state.shadows, // 1
+      state.highlights, // 1
+      state.brilliance, // 1
+      state.vignette, // 1
+      state.sharpness, // 1
+      state.definition, // 1
+      state.noiseReduction, // 1
+      exportW, // 1
+      exportH, // 1
     ];
 
-    const imageShader = image.makeShaderOptions(
-      TileMode.Clamp,
-      TileMode.Clamp,
-      FilterMode.Linear,
-      MipmapMode.None,
-    );
+    // 2. Build Filter Chain
+    step = "Make Image Shader";
+    const rawImageShader = image.makeShaderOptions 
+      ? image.makeShaderOptions(TileMode.Clamp, TileMode.Clamp, FilterMode.Linear, MipmapMode.None)
+      : (image as any).makeShader(TileMode.Clamp, TileMode.Clamp);
 
+    if (!rawImageShader) {
+      throw new Error("Failed to create raw image shader");
+    }
+
+    // 2b. Apply Preset Filter
+    step = "Apply Preset Filter";
+    let filterShader = rawImageShader;
+    if (state.filterId && state.filterId !== "original") {
+      if (state.filterMatrix) {
+        // Use the dedicated Matrix Filter Shader
+        const finalFM = this.blendFilterMatrix(state.filterMatrix, state.filterIntensity);
+        filterShader = filterMatrixEffect.makeShaderWithChildren(
+          [
+            finalFM[0], finalFM[1], finalFM[2], finalFM[3],
+            finalFM[5], finalFM[6], finalFM[7], finalFM[8],
+            finalFM[10], finalFM[11], finalFM[12], finalFM[13],
+            finalFM[15], finalFM[16], finalFM[17], finalFM[18],
+            finalFM[4], finalFM[9], finalFM[14], finalFM[19],
+          ],
+          [filterShader]
+        );
+      } else if (this.filterEffect.value) {
+        // RuntimeShader Filter (e.g. Teal & Orange)
+        filterShader = this.filterEffect.value.makeShader(
+          { intensity: state.filterIntensity / 100 },
+          [filterShader]
+        );
+      }
+    }
+
+    step = "Make Master Shader";
+    const finalShader = masterShaderEffect.makeShaderWithChildren(uniforms, [
+      filterShader,
+    ]);
+
+
+    if (!finalShader) {
+      throw new Error("Failed to create master shader");
+    }
+
+    step = "Setup Paint";
     const paint = Skia.Paint();
-    // Identified from types: use makeShaderWithChildren for input textures
-    const paintShader = masterShaderEffect.makeShaderWithChildren(uniforms, [imageShader]);
-    paint.setShader(paintShader);
-    paint.setColorFilter(
-      Skia.ColorFilter.MakeMatrix(this.calculateMatrix(state)),
-    );
+    paint.setShader(finalShader);
 
+    step = "Draw Base Image";
+
+    // 3. Render Image with Geometry
     canvas.save();
 
+    const w = image.width();
+    const h = image.height();
+    const cx = w / 2;
+    const cy = h / 2;
+
+    // Move surface origin to the top-left of the crop rect if present
     if (state.cropRect) {
       canvas.translate(-state.cropRect.x, -state.cropRect.y);
     }
 
-    canvas.translate(image.width() / 2, image.height() / 2);
-    canvas.rotate(state.rotation, 0, 0);
-    canvas.scale(state.flipX, 1);
-    canvas.translate(-image.width() / 2, -image.height() / 2);
+    // 3b. Calculate Geometric Transforms & Auto-Scale
+    // We must scale the image so that after rotation/perspective it still fills the canvas.
+    const totalRotation = (state.rotation || 0) + (this.straighten.value || 0);
+    const θ = (totalRotation * Math.PI) / 180;
+    const p = (this.pitch.value || 0) * Math.PI / 180;
+    const y = (this.yaw.value || 0) * Math.PI / 180;
 
-    canvas.drawImage(image, 0, 0, paint);
+    const cosT = Math.cos(Math.abs(θ));
+    const sinT = Math.sin(Math.abs(θ));
+    
+    // Straighten Scale (to avoid black corners)
+    const sRot = Math.max((w * cosT + h * sinT) / w, (w * sinT + h * cosT) / h);
+    // Perspective Scales
+    const sPitch = Math.abs(p) > 0.001 ? 1 / Math.cos(Math.abs(p)) : 1;
+    const sYaw   = Math.abs(y) > 0.001 ? 1 / Math.cos(Math.abs(y)) : 1;
+    
+    const s = sRot * sPitch * sYaw;
+    const fx = state.flipX ?? 1;
 
-    canvas.save();
-    canvas.scale(image.width(), image.height());
+    // Apply transforms around image center
+    canvas.translate(cx, cy);
+    
+    // Perspective (Matching commitCrop)
+    const d = 700 * (w / SCREEN_WIDTH); 
+    if (Math.abs(p) > 0.001) {
+      canvas.concat(Skia.Matrix([1, 0, 0, 0, Math.cos(p), 0, 0, Math.sin(p) / d, 1]));
+    }
+    if (Math.abs(y) > 0.001) {
+      canvas.concat(Skia.Matrix([Math.cos(y), 0, 0, 0, 1, 0, Math.sin(y) / d, 0, 1]));
+    }
 
-    const pathPaint = Skia.Paint();
-    pathPaint.setStyle(PaintStyle.Stroke);
-    pathPaint.setStrokeCap(StrokeCap.Round);
-    pathPaint.setStrokeJoin(StrokeJoin.Round);
+    canvas.rotate(totalRotation, 0, 0);
+    canvas.scale(fx * s, s);
+    canvas.translate(-cx, -cy);
 
-    state.paths.forEach((p) => {
-      pathPaint.setColor(Skia.Color(p.color));
-      pathPaint.setStrokeWidth(p.width / SCREEN_WIDTH);
-      canvas.drawPath(p.path, pathPaint);
-    });
+    canvas.drawPaint(paint);
     canvas.restore();
-    canvas.restore();
 
-    return surface;
+    // 4. Render Markup
+    if (state.paths.length > 0) {
+      canvas.save();
+      if (state.cropRect) {
+        canvas.translate(-state.cropRect.x, -state.cropRect.y);
+      }
+      
+      // Geometry for paths must match the image geometry
+      canvas.translate(image.width() / 2, image.height() / 2);
+      canvas.rotate(state.rotation, 0, 0);
+      canvas.scale(state.flipX, 1);
+      canvas.translate(-image.width() / 2, -image.height() / 2);
+
+      // Paths are stored in normalized 0..1 space relative to the image
+      canvas.scale(image.width(), image.height());
+
+      const pathPaint = Skia.Paint();
+      pathPaint.setStyle(PaintStyle.Stroke);
+      pathPaint.setStrokeCap(StrokeCap.Round);
+      pathPaint.setStrokeJoin(StrokeJoin.Round);
+
+      state.paths.forEach((p) => {
+        pathPaint.setColor(Skia.Color(p.color));
+        // Stroke width was designed for SCREEN_WIDTH; scale it for full-res export
+        pathPaint.setStrokeWidth(p.width / SCREEN_WIDTH);
+        canvas.drawPath(p.path, pathPaint);
+      });
+      canvas.restore();
+    }
+
+      return surface;
+    } catch (e: any) {
+      console.error(`Skia Rendering Error at step [${step}]:`, e);
+      throw new Error(`Skia Rendering Error at step [${step}]: ${e.message}`);
+    }
   }
 
   generateFinalImage(): string | null {

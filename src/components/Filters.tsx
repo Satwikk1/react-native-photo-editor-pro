@@ -63,13 +63,16 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
 
   // React state: only used for canvas style dimensions (fires on layout, not during animation)
   const [canvasLayout,   setCanvasLayout]   = useState({ width: SCREEN_WIDTH, height: SCREEN_WIDTH });
-  const [activeFilter,   setActiveFilter]   = useState<FilterConfig>(ORIGINAL_FILTER);
+  const [activeFilter, setActiveFilter] = useState<FilterConfig>(() => {
+    const id = stateManager.filterId.value;
+    return PRO_FILTERS.find(f => f.id === id) ?? ORIGINAL_FILTER;
+  });
   const [activeCategory, setActiveCategory] = useState<FilterCategory | "all">("all");
 
   // SharedValues — updated on the UI thread, never trigger React re-renders
-  const intensitySV    = useSharedValue(100);
-  const activeMatrixSV = useSharedValue<number[]>(IDENTITY_MATRIX);
-  const dialHeightSV   = useSharedValue(0);
+  const intensitySV    = useSharedValue(stateManager.filterIntensity.value);
+  const activeMatrixSV = useSharedValue<number[]>(activeFilter.matrix ?? IDENTITY_MATRIX);
+  const dialHeightSV   = useSharedValue(activeFilter.id === "original" ? 0 : DIAL_MAX_H);
   const canvasHeightSV = useSharedValue(SCREEN_WIDTH); // kept in sync with canvasLayout.height
 
   // ─── Handlers ───────────────────────────────────────────────────────────
@@ -79,12 +82,16 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
     intensitySV.value    = 100;
     activeMatrixSV.value = filter.matrix ?? IDENTITY_MATRIX;
     dialHeightSV.value   = withTiming(filter.id === "original" ? 0 : DIAL_MAX_H, TIMING_CFG);
-  }, [intensitySV, activeMatrixSV, dialHeightSV]);
+
+    // Sync with StateManager
+    stateManager.setFilter(filter.id, filter.matrix ?? null, filter.effect ?? null, 100);
+  }, [intensitySV, activeMatrixSV, dialHeightSV, stateManager]);
 
   const handleIntensityChange = useCallback((val: number) => {
     "worklet";
     intensitySV.value = val;
-  }, [intensitySV]);
+    stateManager.setFilterIntensity(val);
+  }, [intensitySV, stateManager]);
 
   const onCanvasLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;

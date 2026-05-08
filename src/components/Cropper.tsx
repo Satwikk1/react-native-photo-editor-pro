@@ -83,7 +83,14 @@ function triggerHapticTick() {
 
 export const Cropper = ({ stateManager, theme }: CropperProps) => {
   const primaryColor = theme?.primary ?? "#FFD60A";
-  const { cropRect: managerCropRect, flipX: managerFlipX, rotation: managerRotation } = stateManager;
+  const { 
+    cropRect: managerCropRect, 
+    flipX: managerFlipX, 
+    rotation: managerRotation,
+    straighten: straightenSV,
+    pitch: pitchSV,
+    yaw: yawSV
+  } = stateManager;
 
   // Local image state — updated after commitCrop so canvas re-renders with new image
   const [image, setImage] = useState(stateManager.originalImage);
@@ -118,9 +125,7 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
   const canvasHSV = useSharedValue(SCREEN_WIDTH);
 
   // ── Transform SharedValues ───────────────────────────────────────────────────
-  const straightenSV = useSharedValue(0);
-  const pitchSV = useSharedValue(0);
-  const yawSV = useSharedValue(0);
+  // ── Transform SharedValues (Now from manager) ────────────────────────────────
   const gridOpacitySV = useSharedValue(0);
   const drawWidthSV = useSharedValue(initDrawW);
   const drawHeightSV = useSharedValue(initDrawH);
@@ -693,17 +698,13 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: primaryColor }]}
             onPress={() => {
-              // Fold straighten into manager rotation so commitCrop picks it up
-              managerRotation.value = managerRotation.value + straightenSV.value;
+              // Ensure manager has the latest crop rect from the SVs
               managerCropRect.value = {
                 x: cropXSV.value, y: cropYSV.value,
                 width: cropWSV.value, height: cropHSV.value,
               };
-              // Pass pitch/yaw in radians so they're baked into the output
-              stateManager.commitCrop(
-                pitchSV.value * Math.PI / 180,
-                yawSV.value   * Math.PI / 180,
-              );
+              // commitCrop now uses the internal straighten/pitch/yaw values from the manager
+              stateManager.commitCrop();
 
               const newImg = stateManager.originalImage;
 

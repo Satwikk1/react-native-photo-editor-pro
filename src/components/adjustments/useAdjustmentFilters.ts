@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Dimensions } from "react-native";
 import { useDerivedValue, useSharedValue } from "react-native-reanimated";
+import { Skia } from "@shopify/react-native-skia";
 import type { EditorStateManager } from "../../state/EditorStateManager";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -20,6 +21,7 @@ export function useAdjustmentFilters(stateManager: EditorStateManager) {
     autoIntensity,
     autoExposureTarget, autoContrastTarget,
     autoWarmthTarget,   autoSaturationTarget,
+    filterId, filterMatrix, filterIntensity,
   } = stateManager;
 
   // ─── Canvas dimensions ───────────────────────────────────────────────────
@@ -94,17 +96,44 @@ export function useAdjustmentFilters(stateManager: EditorStateManager) {
   // or spatial neighbours: Vibrance · Highlights · Shadows · Brilliance ·
   // Vignette · Sharpness · Definition · Noise Reduction.
 
-  const shaderUniforms = useDerivedValue(() => ({
-    vibrance:       vibrance.value - 1.0,  // stored as 1+v/100 → shader wants −1…1
-    shadows:        shadows.value,          // v/100 → −1…1
-    highlights:     highlights.value,       // v/100 → −1…1
-    brilliance:     brilliance.value,       // v/100 → −1…1
-    vignette:       vignette.value,         // v/100 → −1…1
-    sharpness:      sharpness.value,        // v/100 →  0…1
-    definition:     definition.value,       // v/100 →  0…1
-    noiseReduction: noiseReduction.value,   // v/100 →  0…1
-    canvasSize:     [canvasWidthSV.value, canvasHeightSV.value],
-  }));
+  const shaderUniforms = useDerivedValue(() => {
+    const matrix = colorMatrix.value;
+    // Extract 4x4 submatrix (first 4 columns)
+    const m4x4 = [
+      matrix[0], matrix[1], matrix[2], matrix[3],
+      matrix[5], matrix[6], matrix[7], matrix[8],
+      matrix[10], matrix[11], matrix[12], matrix[13],
+      matrix[15], matrix[16], matrix[17], matrix[18],
+    ];
+    // Extract 4x1 offset (last column)
+    const offset = [matrix[4], matrix[9], matrix[14], matrix[19]];
+
+    return {
+      colorMatrix:    m4x4,
+      colorOffset:    offset,
+      vibrance:       vibrance.value - 1.0,
+      shadows:        shadows.value,
+      highlights:     highlights.value,
+      brilliance:     brilliance.value,
+      vignette:       vignette.value,
+      sharpness:      sharpness.value,
+      definition:     definition.value,
+      noiseReduction: noiseReduction.value,
+      canvasSize:     [canvasWidthSV.value, canvasHeightSV.value],
+    };
+  });
+
+  const filterColorFilter = useDerivedValue(() => {
+    const fId = filterId.value;
+    const rawFM = filterMatrix.value;
+    const fInt = filterIntensity.value;
+    if (fId === "original" || !rawFM) return null;
+
+    const identity = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
+    const t = fInt / 100;
+    const blended = identity.map((v, i) => v + (rawFM[i] - v) * t);
+    return Skia.ColorFilter.MakeMatrix(blended);
+  });
 
   // ─── Image transform ─────────────────────────────────────────────────────
 
@@ -118,6 +147,7 @@ export function useAdjustmentFilters(stateManager: EditorStateManager) {
     onCanvasLayout,
     colorMatrix,
     shaderUniforms,
+    filterColorFilter,
     imageTransform,
   };
 }

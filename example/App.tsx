@@ -4,22 +4,44 @@ import { PhotoEditor } from 'react-native-photo-editor-pro';
 
 export default function App() {
   const [showEditor, setShowEditor] = useState(false);
+  const [editedImage, setEditedImage] = useState<string | null>(null);
 
   return (
     <View style={styles.container}>
       {showEditor ? (
         <View style={styles.editorContainer}>
           <PhotoEditor
-            uri="https://picsum.photos/800/1200"
+            uri={editedImage || "https://picsum.photos/800/1200"}
             onCancel={() => setShowEditor(false)}
-            onSave={(uri: string) => console.log('Saved:', uri)}
+            onSave={(uri: string) => {
+              setEditedImage(uri);
+              setShowEditor(false);
+            }}
             theme={{ primary: "#8B5CF6" }}
           />
         </View>
       ) : (
         <View style={styles.content}>
           <Text style={styles.title}>Photo Editor Pro Example</Text>
-          <Button title="Open Editor" onPress={() => setShowEditor(true)} />
+          {editedImage && (
+            <View style={styles.previewContainer}>
+              <Image
+                source={{ uri: editedImage }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
+              <Button
+                title="Reset Image"
+                color="#EF4444"
+                onPress={() => setEditedImage(null)}
+              />
+            </View>
+          )}
+          <View style={styles.buttonSpacer} />
+          <Button
+            title={editedImage ? "Edit Result Again" : "Open Editor"}
+            onPress={() => setShowEditor(true)}
+          />
         </View>
       )}
     </View>
@@ -41,6 +63,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
     marginBottom: 20,
+    color: "#fff",
+  },
+  previewImage: {
+    width: 300,
+    height: 400,
+    marginBottom: 20,
+    borderRadius: 10,
+  },
+  previewContainer: {
+    alignItems: "center",
+  },
+  buttonSpacer: {
+    height: 10,
   },
   editorContainer: {
     flex: 1,

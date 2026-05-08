@@ -45,6 +45,7 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
     onCanvasLayout,
     colorMatrix,
     shaderUniforms,
+    filterColorFilter,
     imageTransform,
   } = useAdjustmentFilters(stateManager);
 
@@ -126,11 +127,8 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
               width={drawWidth}
               height={drawHeight}
               fit="contain"
+              colorFilter={filterColorFilter}
             >
-              {/* Pass 1 — linear: exposure, contrast, brightness, saturation, warmth, tint */}
-              <ColorMatrix matrix={colorMatrix} />
-              {/* Pass 2 — non-linear: brilliance, highlights, shadows, vibrance,
-                          sharpness, definition, noise reduction, vignette       */}
               <RuntimeShader source={masterShaderEffect} uniforms={shaderUniforms} />
               
               {/* Markup Layer — Render normalized vector paths */}
