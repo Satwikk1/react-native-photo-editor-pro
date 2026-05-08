@@ -2,6 +2,8 @@
 
 A professional-grade, high-performance photo editor for React Native, powered by **React Native Skia** and **Reanimated**.
 
+npm - https://www.npmjs.com/package/react-native-photo-editor-pro
+
 ## Demo
 
 ![Photo Editor Pro Demo - Adjustments](https://raw.githubusercontent.com/Satwikk1/react-native-photo-editor-pro/main/assets/adjust.gif)
