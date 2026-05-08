@@ -58,6 +58,9 @@ export interface EditorState {
   filterMatrix: number[] | null;
   filterIntensity: number;
   filterId: string | null;
+  straighten: number;
+  pitch: number;
+  yaw: number;
 }
 
 

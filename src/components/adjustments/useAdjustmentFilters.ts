@@ -123,16 +123,15 @@ export function useAdjustmentFilters(stateManager: EditorStateManager) {
     };
   });
 
-  const filterColorFilter = useDerivedValue(() => {
+  const filterMatrixBlended = useDerivedValue(() => {
     const fId = filterId.value;
     const rawFM = filterMatrix.value;
     const fInt = filterIntensity.value;
-    if (fId === "original" || !rawFM) return null;
-
     const identity = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
+    if (fId === "original" || !rawFM) return identity;
+
     const t = fInt / 100;
-    const blended = identity.map((v, i) => v + (rawFM[i] - v) * t);
-    return Skia.ColorFilter.MakeMatrix(blended);
+    return identity.map((v, i) => v + (rawFM[i] - v) * t);
   });
 
   // ─── Image transform ─────────────────────────────────────────────────────
@@ -147,7 +146,7 @@ export function useAdjustmentFilters(stateManager: EditorStateManager) {
     onCanvasLayout,
     colorMatrix,
     shaderUniforms,
-    filterColorFilter,
+    filterMatrixBlended,
     imageTransform,
   };
 }

@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Pressable,
 } from "react-native";
-import { Canvas, ColorMatrix, Group, Image, RuntimeShader, Path } from "@shopify/react-native-skia";
+import { Canvas, Group, Image, RuntimeShader, Path, ColorMatrix } from "@shopify/react-native-skia";
 
 import type { EditorStateManager } from "../state/EditorStateManager";
 import { RulerDial } from "./RulerDial";
@@ -45,7 +45,7 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
     onCanvasLayout,
     colorMatrix,
     shaderUniforms,
-    filterColorFilter,
+    filterMatrixBlended,
     imageTransform,
   } = useAdjustmentFilters(stateManager);
 
@@ -127,8 +127,8 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
               width={drawWidth}
               height={drawHeight}
               fit="contain"
-              colorFilter={filterColorFilter}
             >
+              <ColorMatrix matrix={filterMatrixBlended} />
               <RuntimeShader source={masterShaderEffect} uniforms={shaderUniforms} />
               
               {/* Markup Layer — Render normalized vector paths */}
