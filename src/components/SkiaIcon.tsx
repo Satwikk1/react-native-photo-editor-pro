@@ -68,6 +68,8 @@ export const ICON_PATHS = {
     "M9 10m-4.5 0a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0 M15 10m-4.5 0a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0 M12 15.2m-4.5 0a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0",
   ADJUST:
     "M21 4H14M10 4H3M21 12H12M8 12H3M21 20H16M12 20H3M14 2v4M8 10v4M16 18v4",
+  EYE: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 100-6 3 3 0 000 6z",
+  RESET: "M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 3.31-2.69 6-6 6-3.31 0-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z",
 };
 
 export type IconName = keyof typeof ICON_PATHS;
@@ -82,6 +84,7 @@ const FILLED_ICONS = new Set<IconName>([
   "CONTRAST",
   "BLACK_POINT",
   "SHARPNESS",
+  "RESET",
 ]);
 
 interface SkiaIconProps {

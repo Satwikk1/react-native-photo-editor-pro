@@ -1,17 +1,20 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, StatusBar } from 'react-native';
 import { SkiaIcon } from './SkiaIcon';
+import type { EditorTheme } from '../theme/types';
 
 interface EditorHeaderProps {
   activeTab: string;
   onCancel: () => void;
   onSave: () => void;
   onEdit: () => void;
-  theme?: {
-    primary?: string;
-    background?: string;
-    text?: string;
-  };
+  showDrawOption: boolean;
+  enableBeforeAfter: boolean;
+  showOriginal: boolean;
+  onToggleOriginal: () => void;
+  theme?: EditorTheme;
+  enableReset?: boolean;
+  onReset?: () => void;
 }
 
 export const EditorHeader = ({ 
@@ -19,21 +22,53 @@ export const EditorHeader = ({
   onCancel, 
   onSave, 
   onEdit, 
-  theme
+  showDrawOption,
+  enableBeforeAfter,
+  showOriginal,
+  onToggleOriginal,
+  theme,
+  enableReset = true,
+  onReset,
 }: EditorHeaderProps) => {
   if (activeTab === "edit") return null;
 
   const primaryColor = theme?.primary || "#FFD60A";
+  const textColor = theme?.text || "#FFF";
+  const headerBg = theme?.background || "#000";
 
   return (
-    <View style={localStyles.headerContainer}>
+    <View style={[localStyles.headerContainer, { backgroundColor: headerBg }]}>
       <View style={localStyles.topNav}>
-        <TouchableOpacity onPress={onCancel} style={localStyles.navBtn}>
-          <Text style={localStyles.cancelText}>Cancel</Text>
-        </TouchableOpacity>
+        <View style={localStyles.headerLeft}>
+          <TouchableOpacity onPress={onCancel} style={localStyles.navBtn}>
+            <Text style={[localStyles.cancelText, { color: textColor }]}>Cancel</Text>
+          </TouchableOpacity>
+          {enableBeforeAfter && (
+            <TouchableOpacity
+              onPress={onToggleOriginal}
+              style={[
+                localStyles.pencilBtnHeader,
+                { borderColor: showOriginal ? primaryColor : textColor }
+              ]}
+            >
+              <SkiaIcon name="EYE" color={showOriginal ? primaryColor : textColor} size={14} />
+            </TouchableOpacity>
+          )}
+          {enableReset && onReset && (
+            <TouchableOpacity
+              onPress={onReset}
+              style={[
+                localStyles.pencilBtnHeader,
+                { borderColor: textColor }
+              ]}
+            >
+              <SkiaIcon name="RESET" color={textColor} size={14} />
+            </TouchableOpacity>
+          )}
+        </View>
 
         <View style={localStyles.headerCenter}>
-          <Text style={localStyles.modeLabel}>
+          <Text style={[localStyles.modeLabel, { color: textColor }]}>
             {activeTab === "adjust"
               ? "ADJUST"
               : activeTab === "filter"
@@ -43,12 +78,14 @@ export const EditorHeader = ({
         </View>
 
         <View style={localStyles.headerRight}>
-          <TouchableOpacity
-            onPress={onEdit}
-            style={localStyles.pencilBtnHeader}
-          >
-            <SkiaIcon name="PENCIL" color="#FFF" size={14} />
-          </TouchableOpacity>
+          {showDrawOption && (
+            <TouchableOpacity
+              onPress={onEdit}
+              style={[localStyles.pencilBtnHeader, { borderColor: textColor }]}
+            >
+              <SkiaIcon name="PENCIL" color={textColor} size={14} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={onSave} style={[localStyles.doneBtn, { backgroundColor: primaryColor }]}>
             <Text style={localStyles.doneBtnText}>Done</Text>
           </TouchableOpacity>
@@ -63,6 +100,11 @@ const localStyles = StyleSheet.create({
     backgroundColor: "#000",
     paddingBottom: 10,
     zIndex: 10,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   topNav: {
     flexDirection: "row",

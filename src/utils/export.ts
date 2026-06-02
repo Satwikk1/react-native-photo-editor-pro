@@ -1,12 +1,14 @@
-// src/utils/export.ts
-import { Skia, SkImage, ImageFormat } from '@shopify/react-native-skia';
+import { Skia, SkImage } from '@shopify/react-native-skia';
 import { getFilterMatrix, FilterType } from './filters';
+import { convertSkImage } from './convert';
 
 export const exportProcessedImage = async (
   originalImage: SkImage,
   filter: FilterType,
   cropRect?: { x: number; y: number; width: number; height: number },
-  rotationAngle: number = 0
+  rotationAngle: number = 0,
+  format: 'png' | 'jpeg' | 'webp' = 'webp',
+  quality: number = 90
 ): Promise<string | null> => {
   try {
     const width = originalImage.width();
@@ -56,12 +58,8 @@ export const exportProcessedImage = async (
       }
     }
 
-    // 6. Encode to base64
-    const base64Data = finalImage.encodeToBase64(ImageFormat.JPEG, 100);
-
-    // 7. Return the raw base64 string so the library remains zero-dependency
-    // The host app can decide how to save it (e.g. react-native-fs or expo-file-system)
-    return `data:image/jpeg;base64,${base64Data}`;
+    // 6. Encode and return as Data URI
+    return convertSkImage(finalImage, format, quality);
   } catch (error) {
     console.error("Export failed:", error);
     return null;

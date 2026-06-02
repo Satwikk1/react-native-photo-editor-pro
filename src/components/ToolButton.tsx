@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { TouchableOpacity, StyleSheet, View, TextInput } from 'react-native';
 import { Canvas, Path, Skia } from '@shopify/react-native-skia';
-import Animated, { useAnimatedProps, useDerivedValue, SharedValue } from 'react-native-reanimated';
+import Animated, { useAnimatedProps, useDerivedValue, SharedValue, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 import { SkiaIcon, IconName } from './SkiaIcon';
+import { addAlpha } from '../utils/convert';
 
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 
@@ -38,6 +39,18 @@ interface ToolButtonProps {
   onPress: () => void;
   max?: number;
   primaryColor?: string;
+  id?: string;
+  label?: string;
+  theme?: {
+    primary?: string;
+    background?: string;
+    text?: string;
+    sliderActive?: string;
+    iconActive?: string;
+    iconInactive?: string;
+    toolButtonActiveBg?: string;
+    toolButtonInactiveBg?: string;
+  };
 }
 
 export const ToolButton = ({
@@ -47,6 +60,7 @@ export const ToolButton = ({
   onPress,
   max = 100,
   primaryColor = "#FFD60A",
+  theme,
 }: ToolButtonProps) => {
   const animatedProps = useAnimatedProps(() => {
     return {
@@ -54,25 +68,49 @@ export const ToolButton = ({
     } as any;
   });
 
+  const textColor = theme?.text || "#FFF";
+  const activeBtnBg = theme?.toolButtonActiveBg ?? (theme?.background ? theme.background : "#000");
+  const inactiveBtnBg = theme?.toolButtonInactiveBg ?? (theme?.text ? addAlpha(theme.text, "1A") : "#1C1C1E");
+
+  const [showProgress, setShowProgress] = useState(toolValue.value !== 0);
+
+  useEffect(() => {
+    setShowProgress(toolValue.value !== 0);
+  }, [toolValue]);
+
+  useAnimatedReaction(
+    () => toolValue.value !== 0,
+    (hasVal, prevHasVal) => {
+      if (hasVal !== prevHasVal) {
+        runOnJS(setShowProgress)(hasVal);
+      }
+    }
+  );
+
   const hasValue = useDerivedValue(() => toolValue.value !== 0);
-  const iconColor = isActive || hasValue.value ? primaryColor : "#8E8E93";
+  const activeIconColor = theme?.iconActive ?? theme?.primary ?? primaryColor;
+  const inactiveIconColor = theme?.iconInactive ?? (theme?.text ? addAlpha(theme.text, "80") : "#8E8E93");
+  const iconColor = isActive || hasValue.value ? activeIconColor : inactiveIconColor;
+
+  const progressColor = theme?.sliderActive ?? theme?.primary ?? primaryColor;
 
   return (
     <TouchableOpacity
       onPress={onPress}
       style={[
         styles.adjustBtn,
-        isActive && styles.activeBtn,
+        { backgroundColor: inactiveBtnBg },
+        isActive && { backgroundColor: activeBtnBg },
       ]}
     >
-      <CircularProgress value={toolValue} max={max} color={primaryColor} />
+      {showProgress && <CircularProgress value={toolValue} max={max} color={progressColor} />}
       
       {isActive ? (
         <AnimatedTextInput
           underlineColorAndroid="transparent"
           editable={false}
           value={`${Math.round(toolValue.value)}`}
-          style={styles.activeValueText}
+          style={[styles.activeValueText, { color: textColor }]}
           animatedProps={animatedProps}
         />
       ) : (
@@ -87,14 +125,10 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#1C1C1E',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
-  },
-  activeBtn: {
-    backgroundColor: '#000',
   },
   canvasOverlay: {
     position: 'absolute',
@@ -104,7 +138,6 @@ const styles = StyleSheet.create({
     bottom: -2,
   },
   activeValueText: {
-    color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',

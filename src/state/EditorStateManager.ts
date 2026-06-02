@@ -14,6 +14,7 @@ import { masterShaderEffect, filterMatrixEffect } from "../components/adjustment
 import { Dimensions } from "react-native";
 import { makeMutable, SharedValue } from "react-native-reanimated";
 import type { AutoTargets } from "../components/adjustments/autoEnhance";
+import { convertSkImage } from "../utils/convert";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -123,9 +124,11 @@ export class EditorStateManager {
   public cropRect: SharedValue<CropRect | null>;
   public paths: SharedValue<DrawingPath[]>;
   public originalImage: SkImage;
+  private readonly initialImage: SkImage;
 
   constructor(image: SkImage) {
     this.originalImage = image;
+    this.initialImage = image;
 
     // Initialize processing values (Neutral)
     this.exposure = makeMutable(1.0);
@@ -204,6 +207,69 @@ export class EditorStateManager {
 
   public setFilterIntensity(intensity: number) {
     this.filterIntensity.value = intensity;
+  }
+
+  public resetAll() {
+    this.originalImage = this.initialImage;
+
+    // Reset processing values
+    this.exposure.value = 1.0;
+    this.brilliance.value = 0.0;
+    this.highlights.value = 0.0;
+    this.shadows.value = 0.0;
+    this.contrast.value = 1.0;
+    this.brightness.value = 1.0;
+    this.blackPoint.value = 0.0;
+    this.saturation.value = 1.0;
+    this.vibrance.value = 1.0;
+    this.warmth.value = 0.0;
+    this.tint.value = 0.0;
+    this.sharpness.value = 0.0;
+    this.definition.value = 0.0;
+    this.noiseReduction.value = 0.0;
+    this.vignette.value = 0.0;
+
+    // Reset raw values
+    this.exposureRaw.value = 0;
+    this.brillianceRaw.value = 0;
+    this.highlightsRaw.value = 0;
+    this.shadowsRaw.value = 0;
+    this.contrastRaw.value = 0;
+    this.brightnessRaw.value = 0;
+    this.blackPointRaw.value = 0;
+    this.saturationRaw.value = 0;
+    this.vibranceRaw.value = 0;
+    this.warmthRaw.value = 0;
+    this.tintRaw.value = 0;
+    this.sharpnessRaw.value = 0;
+    this.definitionRaw.value = 0;
+    this.noiseReductionRaw.value = 0;
+    this.vignetteRaw.value = 0;
+
+    // Reset auto-enhance values
+    this.autoIntensity.value = 0;
+    this.autoIntensityRaw.value = 0;
+    this.autoExposureTarget.value = 1.0;
+    this.autoContrastTarget.value = 1.0;
+    this.autoWarmthTarget.value = 0.0;
+    this.autoSaturationTarget.value = 1.0;
+
+    // Reset filter values
+    this.filterId.value = "original";
+    this.filterMatrix.value = null;
+    this.filterIntensity.value = 100;
+    this.filterEffect.value = null;
+
+    // Reset crop and transformation values
+    this.rotation.value = 0;
+    this.straighten.value = 0;
+    this.pitch.value = 0;
+    this.yaw.value = 0;
+    this.flipX.value = 1;
+    this.cropRect.value = null;
+
+    // Clear drawings
+    this.paths.value = [];
   }
 
   private blendFilterMatrix(matrix: number[], t: number): number[] {
@@ -666,15 +732,15 @@ export class EditorStateManager {
       throw new Error(`Skia Rendering Error at step [${step}]: ${e.message}`);
     }
   }
-
-  generateFinalImage(): string | null {
+  generateFinalImage(
+    format: "png" | "jpeg" | "webp" = "webp",
+    quality: number = 90
+  ): string | null {
     const surface = this.renderToSurface();
     if (!surface) return null;
 
     const finalImageSnapshot = surface.makeImageSnapshot();
-    const base64Data = finalImageSnapshot.encodeToBase64(ImageFormat.JPEG, 90);
-
-    return `data:image/jpeg;base64,${base64Data}`;
+    return convertSkImage(finalImageSnapshot, format, quality);
   }
 
   // Bakes all current adjustments, filters, markup and geometry into the original image.

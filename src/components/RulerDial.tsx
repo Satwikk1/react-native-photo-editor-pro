@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import { StyleSheet, View, Dimensions, PanResponder } from 'react-native';
 import { Canvas, Rect, Group } from '@shopify/react-native-skia';
-import { useSharedValue, useDerivedValue } from 'react-native-reanimated';
+import { useSharedValue, useDerivedValue, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
+import { addAlpha } from '../utils/convert';
+import { VibrationType, HapticTickType, triggerHaptic } from '../utils/vibration';
+import type { EditorTheme } from '../theme/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TICK_SPACING = 20;
@@ -14,6 +17,10 @@ interface RulerDialProps {
   min?: number;
   max?: number;
   activeColor?: string;
+  theme?: EditorTheme;
+  enableVibration?: boolean;
+  vibrationType?: VibrationType;
+  onTriggerHaptic?: (type: HapticTickType) => void;
 }
 
 export const RulerDial = ({ 
@@ -21,7 +28,11 @@ export const RulerDial = ({
   onChange, 
   min = -100, 
   max = 100, 
-  activeColor = '#FFD60A' 
+  activeColor = '#FFD60A',
+  theme,
+  enableVibration = true,
+  vibrationType = VibrationType.DEFAULT,
+  onTriggerHaptic,
 }: RulerDialProps) => {
   const scrollX = useSharedValue(0);
   const startScrollX = useSharedValue(0);
@@ -119,10 +130,44 @@ export const RulerDial = ({
     return [{ translateX: scrollX.value }];
   });
 
+  const lastVibrationTime = useRef(0);
+  const triggerVibration = (type: HapticTickType) => {
+    const now = Date.now();
+    if (now - lastVibrationTime.current < 35) {
+      return;
+    }
+    lastVibrationTime.current = now;
+    triggerHaptic(type, enableVibration, vibrationType, onTriggerHaptic);
+  };
+
+  useAnimatedReaction(
+    () => {
+      const index = VISUAL_CENTER_INDEX - (scrollX.value / TICK_SPACING);
+      return Math.round(index);
+    },
+    (currentTick, previousTick) => {
+      if (previousTick !== null && currentTick !== previousTick) {
+        const isNeutral = currentTick === neutralIndex;
+        const isMajor = currentTick % 5 === 0;
+        const type = isNeutral 
+          ? HapticTickType.NEUTRAL 
+          : (isMajor ? HapticTickType.MAJOR : HapticTickType.MINOR);
+        runOnJS(triggerVibration)(type);
+      }
+    }
+  );
+
+  const rulerBg = theme?.rulerBg ?? theme?.background ?? '#000';
+  const rulerTickActive = theme?.rulerTickActive ?? theme?.sliderActive ?? theme?.primary ?? activeColor;
+  const rulerTickInactiveMajor = theme?.rulerTickInactive ?? (theme?.text ? addAlpha(theme.text, '66') : '#8E8E93');
+  const rulerTickInactiveMinor = theme?.rulerTickInactive ?? (theme?.text ? addAlpha(theme.text, '33') : '#3A3A3C');
+  const rulerPointer = theme?.rulerPointer ?? theme?.text ?? '#FFF';
+
   return (
-    <View style={styles.dialContainer} {...panResponder.panHandlers}>
+    <View style={[styles.dialContainer, { backgroundColor: rulerBg }]} {...panResponder.panHandlers}>
       <View style={styles.gestureSurface}>
         <Canvas style={styles.canvas} pointerEvents="none">
+          <Rect x={0} y={0} width={SCREEN_WIDTH} height={60} color={rulerBg} />
           {/* Ticks Group */}
           <Group transform={ticksTransform}>
             {Array.from({ length: TICK_COUNT }).map((_, i) => {
@@ -137,7 +182,7 @@ export const RulerDial = ({
                   y={isNeutral ? 10 : isMajor ? 15 : 20}
                   width={isNeutral ? 2 : 1}
                   height={isNeutral ? 35 : isMajor ? 25 : 15}
-                  color={isNeutral ? activeColor : isMajor ? '#8E8E93' : '#3A3A3C'}
+                  color={isNeutral ? rulerTickActive : isMajor ? rulerTickInactiveMajor : rulerTickInactiveMinor}
                 />
               );
             })}
@@ -149,7 +194,7 @@ export const RulerDial = ({
             y={5} 
             width={2} 
             height={45} 
-            color="#FFF" // Current value pointer is white, Neutral is Yellow
+            color={rulerPointer} // Current value pointer is white/custom, Neutral is Yellow/custom
           />
         </Canvas>
       </View>
@@ -161,7 +206,6 @@ const styles = StyleSheet.create({
   dialContainer: {
     height: 60,
     width: SCREEN_WIDTH,
-    backgroundColor: '#000',
     justifyContent: 'center',
   },
   gestureSurface: {

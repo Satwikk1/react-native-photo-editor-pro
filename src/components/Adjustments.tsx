@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Pressable,
 } from "react-native";
-import { Canvas, Group, Image, RuntimeShader, Path, ColorMatrix } from "@shopify/react-native-skia";
+import { Canvas, Group, Image, RuntimeShader, Path, ColorMatrix, Rect } from "@shopify/react-native-skia";
 
 import type { EditorStateManager } from "../state/EditorStateManager";
 import { RulerDial } from "./RulerDial";
@@ -21,18 +21,34 @@ import {
   masterShaderEffect,
 } from "./adjustments/constants";
 import { useAdjustmentFilters } from "./adjustments/useAdjustmentFilters";
+import { VibrationType, HapticTickType } from "../utils/vibration";
+import type { EditorTheme } from "../theme/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AdjustmentsProps {
   stateManager: EditorStateManager;
-  theme?: { primary?: string };
+  theme?: EditorTheme;
+  showOriginal?: boolean;
+  enableVibration?: boolean;
+  vibrationType?: VibrationType;
+  onTriggerHaptic?: (type: HapticTickType) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
+export const Adjustments = ({ 
+  stateManager, 
+  theme, 
+  showOriginal = false,
+  enableVibration = true,
+  vibrationType = VibrationType.DEFAULT,
+  onTriggerHaptic,
+}: AdjustmentsProps) => {
   const primaryColor = theme?.primary ?? "#FFD60A";
+  const textColor = theme?.text ?? "#FFF";
+  const editorBg = theme?.background ?? "#000";
+  const sliderActiveColor = theme?.sliderActive ?? primaryColor;
   const [activeToolId, setActiveToolId] = useState<AdjustTool>(AdjustTool.EXPOSURE);
   const [isAnalyzing,  setIsAnalyzing]  = useState(false);
 
@@ -106,16 +122,21 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
       min={activeTool.range[0]}
       max={activeTool.range[1]}
       onChange={handleToolChange}
-      activeColor={primaryColor}
+      activeColor={sliderActiveColor}
+      theme={theme}
+      enableVibration={enableVibration}
+      vibrationType={vibrationType}
+      onTriggerHaptic={onTriggerHaptic}
     />
   );
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
-      <View style={styles.canvasContainer} onLayout={onCanvasLayout}>
+    <View style={[styles.container, { backgroundColor: editorBg }]}>
+      <View style={[styles.canvasContainer, { backgroundColor: editorBg }]} onLayout={onCanvasLayout}>
         <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }} pointerEvents="none">
+          <Rect x={0} y={0} width={canvasLayout.width} height={canvasLayout.height} color={editorBg} />
           <Group
             origin={{ x: xOffset + drawWidth / 2, y: yOffset + drawHeight / 2 }}
             transform={imageTransform}
@@ -128,8 +149,12 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
               height={drawHeight}
               fit="contain"
             >
-              <ColorMatrix matrix={filterMatrixBlended} />
-              <RuntimeShader source={masterShaderEffect} uniforms={shaderUniforms} />
+              {!showOriginal && (
+                <>
+                  <ColorMatrix matrix={filterMatrixBlended} />
+                  <RuntimeShader source={masterShaderEffect} uniforms={shaderUniforms} />
+                </>
+              )}
               
               {/* Markup Layer — Render normalized vector paths */}
               <Group 
@@ -138,7 +163,7 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
                   { scaleY: drawHeight }
                 ]}
               >
-                {stateManager.paths.value.map((p, idx) => (
+                {!showOriginal && stateManager.paths.value.map((p, idx) => (
                   <Path
                     key={idx}
                     path={p.path}
@@ -155,7 +180,7 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
         </Canvas>
       </View>
 
-      <View style={styles.controlsContainer}>
+      <View style={[styles.controlsContainer, { backgroundColor: editorBg }]}>
         <View style={styles.toolsListWrapper}>
           <FlatList
             horizontal
@@ -166,21 +191,24 @@ export const Adjustments = ({ stateManager, theme }: AdjustmentsProps) => {
             renderItem={({ item }) => (
               <View style={styles.toolItem}>
                 <ToolButton
+                  id={item.id}
+                  label={item.name}
                   icon={item.icon}
                   isActive={activeToolId === item.id}
                   toolValue={getRawValue(item.id)}
                   onPress={() => setActiveToolId(item.id)}
                   max={item.range[1]}
                   primaryColor={primaryColor}
+                  theme={theme}
                 />
               </View>
             )}
           />
         </View>
 
-        <View style={styles.dialWrapper}>
+        <View style={[styles.dialWrapper, { backgroundColor: editorBg }]}>
           <View style={styles.toolNameRow}>
-            <Text style={styles.toolNameText}>
+            <Text style={[styles.toolNameText, { color: textColor }]}>
               {activeToolId === AdjustTool.AUTO ? "AUTO INTENSITY" : activeTool.name}
             </Text>
             {activeToolId === AdjustTool.AUTO && (

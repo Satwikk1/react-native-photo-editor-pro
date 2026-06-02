@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Text,
 } from "react-native";
+import { addAlpha } from "../utils/convert";
 import {
   Canvas,
   Image,
@@ -28,7 +29,12 @@ interface DrawingBoardProps {
   stateManager: EditorStateManager;
   onCancel: () => void;
   onDone: () => void;
-  theme?: { primary?: string };
+  theme?: {
+    primary?: string;
+    background?: string;
+    text?: string;
+    tabBarBackground?: string;
+  };
 }
 
 const COLORS = [
@@ -50,6 +56,9 @@ export const DrawingBoard = ({
   theme,
 }: DrawingBoardProps) => {
   const primaryColor = theme?.primary ?? "#FFD60A";
+  const textColor = theme?.text ?? "#FFF";
+  const editorBg = theme?.background ?? "#000";
+  const tabBarBg = theme?.tabBarBackground ?? "#1C1C1E";
   const {
     paths: managerPaths,
     flipX: managerFlipX,
@@ -131,7 +140,7 @@ export const DrawingBoard = ({
   ]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: editorBg }]}>
       <View style={styles.canvasWrapper} {...panResponder.panHandlers}>
         <Canvas
           style={{ width: SCREEN_WIDTH, height: ACTUAL_EDITOR_HEIGHT }}
@@ -173,7 +182,7 @@ export const DrawingBoard = ({
         </Canvas>
       </View>
 
-      <View style={styles.toolDock}>
+      <View style={[styles.toolDock, { backgroundColor: tabBarBg }]}>
         <View style={styles.strokeSelector}>
           <TouchableOpacity
             onPress={() => setStrokeWidth(2)}
@@ -185,7 +194,8 @@ export const DrawingBoard = ({
                 {
                   width: 4,
                   height: 4,
-                  backgroundColor: strokeWidth === 2 ? "#FFD60A" : "#FFF",
+                  backgroundColor: strokeWidth === 2 ? primaryColor : textColor,
+                  opacity: strokeWidth === 2 ? 1 : 0.4,
                 },
               ]}
             />
@@ -200,7 +210,8 @@ export const DrawingBoard = ({
                 {
                   width: 8,
                   height: 8,
-                  backgroundColor: strokeWidth === 4 ? "#FFD60A" : "#FFF",
+                  backgroundColor: strokeWidth === 4 ? primaryColor : textColor,
+                  opacity: strokeWidth === 4 ? 1 : 0.4,
                 },
               ]}
             />
@@ -215,7 +226,8 @@ export const DrawingBoard = ({
                 {
                   width: 14,
                   height: 14,
-                  backgroundColor: strokeWidth === 8 ? "#FFD60A" : "#FFF",
+                  backgroundColor: strokeWidth === 8 ? primaryColor : textColor,
+                  opacity: strokeWidth === 8 ? 1 : 0.4,
                 },
               ]}
             />
@@ -237,8 +249,11 @@ export const DrawingBoard = ({
         </View>
 
         <View style={styles.actionButtons}>
-          <TouchableOpacity onPress={onCancel} style={styles.actionBtn}>
-            <Text style={styles.actionBtnText}>Cancel</Text>
+          <TouchableOpacity 
+            onPress={onCancel} 
+            style={[styles.actionBtn, { backgroundColor: theme?.text ? addAlpha(theme.text, '1A') : "#2C2C2E" }]}
+          >
+            <Text style={[styles.actionBtnText, { color: textColor }]}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => {

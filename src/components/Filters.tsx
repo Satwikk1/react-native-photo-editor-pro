@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   Dimensions,
   FlatList,
@@ -17,11 +17,14 @@ import Animated, {
   withTiming,
   Easing,
 } from "react-native-reanimated";
-import { Canvas, ColorMatrix, Group, Image, RuntimeShader, Path } from "@shopify/react-native-skia";
+import { Canvas, ColorMatrix, Group, Image, RuntimeShader, Path, Rect, Skia } from "@shopify/react-native-skia";
 
 import type { EditorStateManager } from "../state/EditorStateManager";
 import { FilterThumbnail } from "./FilterThumbnail";
 import { RulerDial } from "./RulerDial";
+import { VibrationType, HapticTickType } from "../utils/vibration";
+import { addAlpha } from "../utils/convert";
+import type { EditorTheme } from "../theme/types";
 import {
   blendMatrix,
   IDENTITY_MATRIX,
@@ -54,18 +57,64 @@ const CATEGORIES: { key: FilterCategory | "all"; label: string }[] = [
 
 interface FiltersProps {
   stateManager: EditorStateManager;
-  theme?: { primary?: string };
+  theme?: EditorTheme;
+  showOriginal?: boolean;
+  customFilters?: FilterConfig[];
+  replaceDefaultFilters?: boolean;
+  enableVibration?: boolean;
+  vibrationType?: VibrationType;
+  onTriggerHaptic?: (type: HapticTickType) => void;
 }
 
-export const Filters = ({ stateManager, theme }: FiltersProps) => {
+export const Filters = ({
+  stateManager,
+  theme,
+  showOriginal = false,
+  customFilters,
+  replaceDefaultFilters = false,
+  enableVibration = true,
+  vibrationType = VibrationType.DEFAULT,
+  onTriggerHaptic,
+}: FiltersProps) => {
   const primaryColor = theme?.primary ?? "#FFD60A";
+  const textColor = theme?.text ?? "#FFF";
+  const editorBg = theme?.background ?? "#000";
+  const sliderActiveColor = theme?.sliderActive ?? primaryColor;
+
   const { rotation, flipX, originalImage: image } = stateManager;
+
+  const thumbImage = useMemo(() => {
+    if (!image) return null;
+    const tw = 120;
+    const th = Math.round(tw * (image.height() / image.width()));
+    const surface = Skia.Surface.Make(tw, th);
+    if (!surface) return image;
+    const canvas = surface.getCanvas();
+    const paint = Skia.Paint();
+    canvas.drawImageRect(
+      image,
+      { x: 0, y: 0, width: image.width(), height: image.height() },
+      { x: 0, y: 0, width: tw, height: th },
+      paint
+    );
+    return surface.makeImageSnapshot();
+  }, [image]);
+
+  // Custom filter merging
+  const allFilters = useMemo(() => {
+    if (replaceDefaultFilters) {
+      const orig = PRO_FILTERS.find((f) => f.id === "original") || ORIGINAL_FILTER;
+      const filteredCustom = (customFilters || []).filter((f) => f.id !== "original");
+      return [orig, ...filteredCustom];
+    }
+    return [...PRO_FILTERS, ...(customFilters || [])];
+  }, [customFilters, replaceDefaultFilters]);
 
   // React state: only used for canvas style dimensions (fires on layout, not during animation)
   const [canvasLayout,   setCanvasLayout]   = useState({ width: SCREEN_WIDTH, height: SCREEN_WIDTH });
   const [activeFilter, setActiveFilter] = useState<FilterConfig>(() => {
     const id = stateManager.filterId.value;
-    return PRO_FILTERS.find(f => f.id === id) ?? ORIGINAL_FILTER;
+    return allFilters.find(f => f.id === id) ?? ORIGINAL_FILTER;
   });
   const [activeCategory, setActiveCategory] = useState<FilterCategory | "all">("all");
 
@@ -143,17 +192,18 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
   // ─── Filtered list ──────────────────────────────────────────────────────
 
   const visibleFilters = activeCategory === "all"
-    ? PRO_FILTERS
-    : PRO_FILTERS.filter(f => f.category === activeCategory || f.id === "original");
+    ? allFilters
+    : allFilters.filter(f => f.category === activeCategory || f.id === "original");
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: editorBg }]}>
 
       {/* Canvas — fills full container, never resizes */}
-      <View style={styles.canvasContainer} onLayout={onCanvasLayout}>
+      <View style={[styles.canvasContainer, { backgroundColor: editorBg }]} onLayout={onCanvasLayout}>
         <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }}>
+          <Rect x={0} y={0} width={canvasLayout.width} height={canvasLayout.height} color={editorBg} />
           {/* Outer: reactive Y position so image stays above the controls overlay */}
           <Group transform={positionTransform}>
             {/* Inner: rotation + flip pivot around the image centre */}
@@ -169,10 +219,11 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
                 height={drawHeight}
                 fit="contain"
               >
-                {activeFilter.effect
-                  ? <RuntimeShader source={activeFilter.effect} uniforms={shaderUniforms} />
-                  : <ColorMatrix matrix={blendedMatrix} />
-                }
+                {!showOriginal && (
+                  activeFilter.effect
+                    ? <RuntimeShader source={activeFilter.effect} uniforms={shaderUniforms} />
+                    : <ColorMatrix matrix={blendedMatrix} />
+                )}
                 
                 {/* Markup Layer — Render normalized vector paths */}
                 <Group 
@@ -181,7 +232,7 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
                     { scaleY: drawHeight }
                   ]}
                 >
-                  {stateManager.paths.value.map((p, idx) => (
+                  {!showOriginal && stateManager.paths.value.map((p, idx) => (
                     <Path
                       key={idx}
                       path={p.path}
@@ -200,7 +251,7 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
       </View>
 
       {/* Controls — absolute overlay, never pushes the canvas */}
-      <View style={styles.controls}>
+      <View style={[styles.controls, { backgroundColor: editorBg }]}>
         <View style={styles.categoryRow}>
           {CATEGORIES.map(cat => (
             <Pressable
@@ -213,7 +264,7 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
             >
               <Text style={[
                 styles.categoryLabel,
-                activeCategory === cat.key && { color: primaryColor },
+                activeCategory === cat.key ? { color: primaryColor } : { color: addAlpha(textColor, "80") },
               ]}>
                 {cat.label}
               </Text>
@@ -231,7 +282,7 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
           renderItem={({ item }) => (
             <View style={styles.thumbnailItem}>
               <FilterThumbnail
-                image={image}
+                image={thumbImage ?? image}
                 filter={item}
                 isActive={activeFilter.id === item.id}
                 onPress={() => handleFilterSelect(item)}
@@ -239,7 +290,7 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
               />
               <Text style={[
                 styles.filterName,
-                activeFilter.id === item.id && { color: primaryColor },
+                activeFilter.id === item.id ? { color: primaryColor } : { color: addAlpha(textColor, "B3") },
               ]}>
                 {item.name}
               </Text>
@@ -251,9 +302,19 @@ export const Filters = ({ stateManager, theme }: FiltersProps) => {
           <AnimatedTextInput
             animatedProps={intensityLabelProps}
             editable={false}
-            style={styles.intensityLabel}
+            style={[styles.intensityLabel, { color: textColor }]}
           />
-          <RulerDial value={100} min={0} max={100} onChange={handleIntensityChange} activeColor={primaryColor} />
+          <RulerDial
+            value={100}
+            min={0}
+            max={100}
+            onChange={handleIntensityChange}
+            activeColor={sliderActiveColor}
+            theme={theme}
+            enableVibration={enableVibration}
+            vibrationType={vibrationType}
+            onTriggerHaptic={onTriggerHaptic}
+          />
         </Animated.View>
       </View>
 

@@ -16,6 +16,9 @@ interface TabButtonProps {
     primary?: string;
     background?: string;
     text?: string;
+    tabBarBackground?: string;
+    sliderActive?: string;
+    sliderInactive?: string;
   };
 }
 
@@ -25,6 +28,8 @@ const INACTIVE_COLOR = '#8E8E93';
 export const TabButton = ({ id, label, icon, activeTab, onPress, theme }: TabButtonProps) => {
   const isActive = activeTab === id;
   const primaryColor = theme?.primary || DEFAULT_THEME_COLOR;
+  const activeColor = theme?.primary || '#FFFFFF';
+  const inactiveColor = theme?.text ? theme.text + '80' : INACTIVE_COLOR;
   
   return (
     <TouchableOpacity 
@@ -47,7 +52,7 @@ export const TabButton = ({ id, label, icon, activeTab, onPress, theme }: TabBut
         <View style={localStyles.tabIconWrapper}>
           <SkiaIcon 
             name={icon} 
-            color={isActive ? '#FFFFFF' : INACTIVE_COLOR} 
+            color={isActive ? activeColor : inactiveColor} 
             size={24} 
           />
         </View>
@@ -55,7 +60,7 @@ export const TabButton = ({ id, label, icon, activeTab, onPress, theme }: TabBut
       
       <Text style={[
         localStyles.tabText, 
-        { color: isActive ? '#FFFFFF' : INACTIVE_COLOR }
+        { color: isActive ? activeColor : inactiveColor }
       ]}>
         {label}
       </Text>

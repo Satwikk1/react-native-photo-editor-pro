@@ -18,22 +18,27 @@ import {
   Skia,
   FillType,
   Group,
+  Rect,
 } from "@shopify/react-native-skia";
 import Animated, {
   useSharedValue,
   useDerivedValue,
-  useAnimatedProps,
-  useAnimatedReaction,
-  withTiming,
-  withDelay,
-  cancelAnimation,
-  runOnJS,
-  Easing,
   useAnimatedStyle,
+  useAnimatedProps,
+  withTiming,
+  withSpring,
+  withDelay,
+  useAnimatedReaction,
+  runOnJS,
+  cancelAnimation,
+  Easing,
 } from "react-native-reanimated";
+import { VibrationType, HapticTickType, triggerHaptic } from "../utils/vibration";
 
 import { EditorStateManager } from "../state/EditorStateManager";
+import { isSupportedFormat, addAlpha } from "../utils/convert";
 import { RulerDial } from "./RulerDial";
+import type { EditorTheme } from "../theme/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -42,7 +47,11 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 interface CropperProps {
   stateManager: EditorStateManager;
-  theme?: { primary?: string };
+  theme?: EditorTheme;
+  showOriginal?: boolean;
+  enableVibration?: boolean;
+  vibrationType?: VibrationType;
+  onTriggerHaptic?: (type: HapticTickType) => void;
 }
 
 const RATIOS = [
@@ -72,17 +81,25 @@ const RATIO_ANIM = { duration: 280, easing: Easing.out(Easing.cubic) };
 const ZOOM_IN = { duration: 400, easing: Easing.out(Easing.cubic) };
 const ZOOM_OUT = { duration: 250, easing: Easing.out(Easing.quad) };
 
-// Light haptic tick — swap for expo-haptics on iOS for a proper selection tick.
-function triggerHapticTick() {
-  try {
-    Vibration.vibrate(10);
-  } catch (_) {}
-}
+// We've moved the trigger haptic tick logic inside the component to respect developer settings
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export const Cropper = ({ stateManager, theme }: CropperProps) => {
+export const Cropper = ({ 
+  stateManager, 
+  theme, 
+  showOriginal = false,
+  enableVibration = true,
+  vibrationType = VibrationType.DEFAULT,
+  onTriggerHaptic,
+}: CropperProps) => {
   const primaryColor = theme?.primary ?? "#FFD60A";
+  const textColor = theme?.text ?? "#FFF";
+  const editorBg = theme?.background ?? "#000";
+  const toolButtonActiveBg = theme?.toolButtonActiveBg ?? (theme?.text ? addAlpha(theme.text, '24') : "#2C2C2E");
+  const toolButtonInactiveBg = theme?.toolButtonInactiveBg ?? (theme?.text ? addAlpha(theme.text, '14') : "#1C1C1E");
+  const iconActiveColor = theme?.iconActive ?? primaryColor;
+  const iconInactiveColor = theme?.iconInactive ?? (theme?.text ? addAlpha(theme.text, '80') : "#888");
   const { 
     cropRect: managerCropRect, 
     flipX: managerFlipX, 
@@ -140,11 +157,15 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
 
   // ─── Haptic tick when straighten crosses 0° ──────────────────────────────────
 
+  const handleStraightenNeutralTick = () => {
+    triggerHaptic(HapticTickType.NEUTRAL, enableVibration, vibrationType, onTriggerHaptic);
+  };
+
   useAnimatedReaction(
     () => straightenSV.value > 0,
     (isPositive, wasPositive) => {
       if (wasPositive !== null && isPositive !== wasPositive) {
-        runOnJS(triggerHapticTick)();
+        runOnJS(handleStraightenNeutralTick)();
       }
     },
   );
@@ -585,20 +606,21 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
-      <View style={styles.canvasContainer} onLayout={onLayout} {...panResponder.panHandlers}>
+    <View style={[styles.container, { backgroundColor: editorBg }]}>
+      <View style={[styles.canvasContainer, { backgroundColor: editorBg }]} onLayout={onLayout} {...panResponder.panHandlers}>
         {canvasLayout.height > 0 && (
           <Canvas
             style={{ width: canvasLayout.width, height: canvasLayout.height }}
             pointerEvents="none"
           >
+            <Rect x={0} y={0} width={canvasLayout.width} height={canvasLayout.height} color={editorBg} />
             {/* Outer zoom group — scales around canvas centre, clips at canvas edge */}
-            <Group origin={zoomOrigin} transform={zoomGroupTransform}>
+            <Group origin={zoomOrigin} transform={showOriginal ? [] : zoomGroupTransform}>
 
               {/* Image with rotation/perspective/flip */}
               <Group
                 origin={{ x: xOffset + drawWidth / 2, y: yOffset + drawHeight / 2 }}
-                transform={transform}
+                transform={showOriginal ? [] : transform}
               >
                 <Image
                   image={image}
@@ -611,22 +633,26 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
               </Group>
 
               {/* Semi-transparent overlay outside crop */}
-              <Path path={overlayPath} color="rgba(0,0,0,0.6)" />
+              {!showOriginal && <Path path={overlayPath} color="rgba(0,0,0,0.6)" />}
 
               {/* Rule-of-thirds grid — visible during gesture, fades after zoom */}
-              <Group opacity={gridOpacitySV}>
-                <Path path={gridPath} color="rgba(255,255,255,0.4)" style="stroke" strokeWidth={0.7} />
-              </Group>
+              {!showOriginal && (
+                <Group opacity={gridOpacitySV}>
+                  <Path path={gridPath} color="rgba(255,255,255,0.4)" style="stroke" strokeWidth={0.7} />
+                </Group>
+              )}
 
               {/* L-shaped corner handles */}
-              <Path path={handlesPath} color="#FFF" style="stroke" strokeWidth={3} strokeJoin="round" strokeCap="round" />
+              {!showOriginal && (
+                <Path path={handlesPath} color="#FFF" style="stroke" strokeWidth={3} strokeJoin="round" strokeCap="round" />
+              )}
 
             </Group>
           </Canvas>
         )}
       </View>
 
-      <View style={styles.controls}>
+      <View style={[styles.controls, { backgroundColor: editorBg }]}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -644,7 +670,7 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
               <Text
                 style={[
                   styles.ratioText,
-                  activeRatio === r && { color: primaryColor },
+                  activeRatio === r ? { color: primaryColor } : { color: addAlpha(textColor, "80") },
                 ]}
               >
                 {r}
@@ -656,7 +682,7 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
         <View style={styles.toolRow}>
           {/* Reset — clears crop/rotation back to full image */}
           <TouchableOpacity
-            style={styles.actionBtn}
+            style={[styles.actionBtn, { backgroundColor: toolButtonInactiveBg }]}
             onPress={() => {
               const iw = image.width(), ih = image.height();
               cropXSV.value = withTiming(0, RATIO_ANIM);
@@ -676,7 +702,7 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
               managerCropRect.value = null;
             }}
           >
-            <Text style={styles.actionBtnText}>Reset</Text>
+            <Text style={[styles.actionBtnText, { color: textColor }]}>Reset</Text>
           </TouchableOpacity>
 
           {/* Transform tool buttons */}
@@ -684,12 +710,15 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
             {(["straighten", "vertical", "horizontal"] as const).map((tool, idx) => (
               <TouchableOpacity
                 key={tool}
-                style={[styles.toolBtn, selectedTool === tool && styles.toolBtnActive]}
+                style={[
+                  styles.toolBtn,
+                  { backgroundColor: selectedTool === tool ? toolButtonActiveBg : toolButtonInactiveBg }
+                ]}
                 onPress={() => { setSelectedTool(tool); selectedToolSV.value = idx; }}
               >
-                {tool === "straighten" && <StraightenIcon  active={selectedTool === tool} primaryColor={primaryColor} />}
-                {tool === "vertical"   && <VerticalIcon    active={selectedTool === tool} primaryColor={primaryColor} />}
-                {tool === "horizontal" && <HorizontalIcon  active={selectedTool === tool} primaryColor={primaryColor} />}
+                {tool === "straighten" && <StraightenIcon  active={selectedTool === tool} activeColor={iconActiveColor} inactiveColor={iconInactiveColor} />}
+                {tool === "vertical"   && <VerticalIcon    active={selectedTool === tool} activeColor={iconActiveColor} inactiveColor={iconInactiveColor} />}
+                {tool === "horizontal" && <HorizontalIcon  active={selectedTool === tool} activeColor={iconActiveColor} inactiveColor={iconInactiveColor} />}
               </TouchableOpacity>
             ))}
           </View>
@@ -736,7 +765,17 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
 
         <AnimatedTextInput animatedProps={dialLabelProps} editable={false} style={styles.dialLabel} />
 
-        <RulerDial value={activeDialSV.value} min={-45} max={45} onChange={handleDialChange} activeColor={primaryColor} />
+        <RulerDial
+          value={activeDialSV.value}
+          min={-45}
+          max={45}
+          onChange={handleDialChange}
+          activeColor={primaryColor}
+          theme={theme}
+          enableVibration={enableVibration}
+          vibrationType={vibrationType}
+          onTriggerHaptic={onTriggerHaptic}
+        />
       </View>
     </View>
   );
@@ -746,8 +785,8 @@ export const Cropper = ({ stateManager, theme }: CropperProps) => {
 
 const ICON_SIZE = 26;
 
-const StraightenIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; primaryColor?: string }) => {
-  const c = active ? primaryColor : "#888";
+const StraightenIcon = ({ active, activeColor = "#FFD60A", inactiveColor = "#888" }: { active: boolean; activeColor?: string; inactiveColor?: string }) => {
+  const c = active ? activeColor : inactiveColor;
   return (
     <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }} pointerEvents="none">
       <Path
@@ -768,8 +807,8 @@ const StraightenIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean;
   );
 };
 
-const VerticalIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; primaryColor?: string }) => {
-  const c = active ? primaryColor : "#888";
+const VerticalIcon = ({ active, activeColor = "#FFD60A", inactiveColor = "#888" }: { active: boolean; activeColor?: string; inactiveColor?: string }) => {
+  const c = active ? activeColor : inactiveColor;
   return (
     <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }} pointerEvents="none">
       <Path
@@ -783,8 +822,8 @@ const VerticalIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; p
   );
 };
 
-const HorizontalIcon = ({ active, primaryColor = "#FFD60A" }: { active: boolean; primaryColor?: string }) => {
-  const c = active ? primaryColor : "#888";
+const HorizontalIcon = ({ active, activeColor = "#FFD60A", inactiveColor = "#888" }: { active: boolean; activeColor?: string; inactiveColor?: string }) => {
+  const c = active ? activeColor : inactiveColor;
   return (
     <Canvas style={{ width: ICON_SIZE, height: ICON_SIZE }} pointerEvents="none">
       <Path
