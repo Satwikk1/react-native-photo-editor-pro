@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Pressable,
 } from "react-native";
-import { Canvas, Group, Image, RuntimeShader, Path, ColorMatrix, Rect } from "@shopify/react-native-skia";
+import { Canvas, Group, Image, RuntimeShader, Path, ColorMatrix, Rect, FilterMode, MipmapMode, ImageShader } from "@shopify/react-native-skia";
 
 import type { EditorStateManager } from "../state/EditorStateManager";
 import { RulerDial } from "./RulerDial";
@@ -23,6 +23,7 @@ import {
 import { useAdjustmentFilters } from "./adjustments/useAdjustmentFilters";
 import { VibrationType, HapticTickType } from "../utils/vibration";
 import type { EditorTheme } from "../theme/types";
+import { useZoomPan } from "../hooks/useZoomPan";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,14 +57,26 @@ export const Adjustments = ({
   // on explicit user request, not every time they switch back to the AUTO tool.
   const hasAnalysedRef = useRef(false);
 
+  const containerRef = useRef<View>(null);
+  const canvasOffsetRef = useRef({ x: 0, y: 0 });
+
   const {
     canvasLayout,
-    onCanvasLayout,
+    onCanvasLayout: originalOnCanvasLayout,
     colorMatrix,
     shaderUniforms,
     filterMatrixBlended,
     imageTransform,
   } = useAdjustmentFilters(stateManager);
+
+  const onCanvasLayout = useCallback((e: any) => {
+    originalOnCanvasLayout(e);
+    containerRef.current?.measure((x, y, w, h, px, py) => {
+      canvasOffsetRef.current = { x: px, y: py };
+    });
+  }, [originalOnCanvasLayout]);
+
+  const { panHandlers, zoomTransform } = useZoomPan(canvasLayout, canvasOffsetRef);
 
   const activeTool = useMemo(
     () => ADJUST_TOOLS.find((t) => t.id === activeToolId)!,
@@ -134,26 +147,49 @@ export const Adjustments = ({
 
   return (
     <View style={[styles.container, { backgroundColor: editorBg }]}>
-      <View style={[styles.canvasContainer, { backgroundColor: editorBg }]} onLayout={onCanvasLayout}>
+      <View 
+        ref={containerRef}
+        style={[styles.canvasContainer, { backgroundColor: editorBg }]} 
+        onLayout={onCanvasLayout}
+        {...panHandlers}
+      >
         <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }} pointerEvents="none">
           <Rect x={0} y={0} width={canvasLayout.width} height={canvasLayout.height} color={editorBg} />
           <Group
-            origin={{ x: xOffset + drawWidth / 2, y: yOffset + drawHeight / 2 }}
-            transform={imageTransform}
+            transform={zoomTransform}
           >
-            <Image
-              image={image}
-              x={xOffset}
-              y={yOffset}
-              width={drawWidth}
-              height={drawHeight}
-              fit="contain"
+            <Group
+              origin={{ x: xOffset + drawWidth / 2, y: yOffset + drawHeight / 2 }}
+              transform={imageTransform}
             >
-              {!showOriginal && (
-                <>
-                  <ColorMatrix matrix={filterMatrixBlended} />
-                  <RuntimeShader source={masterShaderEffect} uniforms={shaderUniforms} />
-                </>
+              {showOriginal ? (
+                <Image
+                  image={image}
+                  x={xOffset}
+                  y={yOffset}
+                  width={drawWidth}
+                  height={drawHeight}
+                  fit="contain"
+                  sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.Linear }}
+                />
+              ) : (
+                <Rect
+                  x={xOffset}
+                  y={yOffset}
+                  width={drawWidth}
+                  height={drawHeight}
+                >
+                  <RuntimeShader source={masterShaderEffect} uniforms={shaderUniforms}>
+                    <ColorMatrix matrix={filterMatrixBlended}>
+                      <ImageShader
+                        image={image}
+                        rect={{ x: xOffset, y: yOffset, width: drawWidth, height: drawHeight }}
+                        fit="contain"
+                        sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.Linear }}
+                      />
+                    </ColorMatrix>
+                  </RuntimeShader>
+                </Rect>
               )}
               
               {/* Markup Layer — Render normalized vector paths */}
@@ -175,7 +211,7 @@ export const Adjustments = ({
                   />
                 ))}
               </Group>
-            </Image>
+            </Group>
           </Group>
         </Canvas>
       </View>

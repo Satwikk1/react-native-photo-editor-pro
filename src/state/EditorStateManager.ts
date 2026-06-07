@@ -113,7 +113,7 @@ export class EditorStateManager {
   // Filter State
   public filterMatrix: SharedValue<number[] | null>;
   public filterIntensity: SharedValue<number>;
-  public filterEffect: SharedValue<any | null>; // Using any to avoid complex Skia types in mutable
+  public filterEffect: any | null; // Plain class property since SkRuntimeEffect is a host object and cannot be inside a SharedValue
   public filterId: SharedValue<string | null>;
 
   public rotation: SharedValue<number>;
@@ -173,7 +173,7 @@ export class EditorStateManager {
 
     this.filterMatrix = makeMutable<number[] | null>(null);
     this.filterIntensity = makeMutable(100);
-    this.filterEffect = makeMutable<any | null>(null);
+    this.filterEffect = null;
     this.filterId = makeMutable<string | null>("original");
 
     this.rotation = makeMutable(0);
@@ -201,7 +201,7 @@ export class EditorStateManager {
   public setFilter(id: string, matrix: number[] | null, effect: any | null, intensity: number) {
     this.filterId.value = id;
     this.filterMatrix.value = matrix;
-    this.filterEffect.value = effect;
+    this.filterEffect = effect;
     this.filterIntensity.value = intensity;
   }
 
@@ -258,7 +258,7 @@ export class EditorStateManager {
     this.filterId.value = "original";
     this.filterMatrix.value = null;
     this.filterIntensity.value = 100;
-    this.filterEffect.value = null;
+    this.filterEffect = null;
 
     // Reset crop and transformation values
     this.rotation.value = 0;
@@ -549,7 +549,7 @@ export class EditorStateManager {
 
   // Internal helper to render the current state onto a surface.
   // Used by both generateFinalImage (for export) and commitAll (for baking).
-  private renderToSurface() {
+  private renderToSurface(maxSize?: number) {
     const state = this.getState();
     const image = this.originalImage;
 
@@ -560,11 +560,26 @@ export class EditorStateManager {
       ? Math.round(state.cropRect.height)
       : image.height();
 
+    let scaleFactor = 1.0;
+    if (maxSize && maxSize > 0) {
+      const longestEdge = Math.max(exportW, exportH);
+      if (longestEdge > maxSize) {
+        scaleFactor = maxSize / longestEdge;
+      }
+    }
+
+    const surfaceW = Math.round(exportW * scaleFactor);
+    const surfaceH = Math.round(exportH * scaleFactor);
+
     let step = "Initialize Surface";
     try {
-      const surface = Skia.Surface.Make(exportW, exportH);
+      const surface = Skia.Surface.Make(surfaceW, surfaceH);
       if (!surface) return null;
       const canvas = surface.getCanvas();
+
+      if (scaleFactor < 0.999) {
+        canvas.scale(scaleFactor, scaleFactor);
+      }
 
       step = "Prepare Matrix";
 
@@ -620,10 +635,10 @@ export class EditorStateManager {
           ],
           [filterShader]
         );
-      } else if (this.filterEffect.value) {
+      } else if (this.filterEffect) {
         // RuntimeShader Filter (e.g. Teal & Orange)
-        filterShader = this.filterEffect.value.makeShader(
-          { intensity: state.filterIntensity / 100 },
+        filterShader = this.filterEffect.makeShader(
+          [state.filterIntensity / 100],
           [filterShader]
         );
       }
@@ -733,10 +748,11 @@ export class EditorStateManager {
     }
   }
   generateFinalImage(
-    format: "png" | "jpeg" | "webp" = "webp",
-    quality: number = 90
+    format: "png" | "jpeg" | "webp" = "png",
+    quality: number = 100,
+    maxSize?: number
   ): string | null {
-    const surface = this.renderToSurface();
+    const surface = this.renderToSurface(maxSize);
     if (!surface) return null;
 
     const finalImageSnapshot = surface.makeImageSnapshot();

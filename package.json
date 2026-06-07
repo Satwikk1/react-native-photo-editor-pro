@@ -1,6 +1,6 @@
 {
   "name": "react-native-photo-editor-pro",
-  "version": "1.0.6",
+  "version": "2.1.0",
   "description": "A high-performance photo editor for React Native using Skia",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -26,7 +26,7 @@
     "!**/__mocks__",
     "!**/.*"
   ],
-  "private": false,
+  "private": true,
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "bob build",

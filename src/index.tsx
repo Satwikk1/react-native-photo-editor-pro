@@ -21,6 +21,7 @@ interface PhotoEditorProps {
   theme?: EditorTheme;
   exportFormat?: "png" | "jpeg" | "webp";
   exportQuality?: number;
+  exportMaxSize?: number;
   visibleTabs?: ("crop" | "filter" | "adjust" | "draw")[];
   customFilters?: { id: string; name: string; matrix?: number[]; effect?: any; category: "original" | "analog" | "cinematic" | "bw" }[];
   replaceDefaultFilters?: boolean;
@@ -29,6 +30,7 @@ interface PhotoEditorProps {
   enableVibration?: boolean;
   vibrationType?: VibrationType;
   onTriggerHaptic?: (type: HapticTickType) => void;
+  defaultTab?: "crop" | "filter" | "adjust" | "draw";
 }
 
 export const PhotoEditor = ({
@@ -36,8 +38,9 @@ export const PhotoEditor = ({
   onSave,
   onCancel,
   theme,
-  exportFormat = "webp",
-  exportQuality = 90,
+  exportFormat = "png",
+  exportQuality = 100,
+  exportMaxSize = 1280,
   visibleTabs = ["adjust", "filter", "crop", "draw"],
   customFilters,
   replaceDefaultFilters = false,
@@ -46,6 +49,7 @@ export const PhotoEditor = ({
   enableVibration = true,
   vibrationType = VibrationType.DEFAULT,
   onTriggerHaptic,
+  defaultTab = "filter",
 }: PhotoEditorProps) => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isValidFormat, setIsValidFormat] = useState(true);
@@ -102,22 +106,25 @@ export const PhotoEditor = ({
     }
   }, [uri]);
 
-  // Dynamically set default active tab on startup
-  const defaultTab = useMemo(() => {
-    const mainTab = visibleTabs.find((t) => t !== "draw");
-    return mainTab || "filter";
-  }, [visibleTabs]);
+  // Set default active tab on startup
+  const initialTab = useMemo(() => {
+    if (visibleTabs.includes(defaultTab)) {
+      return defaultTab;
+    }
+    const fallback = visibleTabs.find((t) => t !== "draw");
+    return fallback || "filter";
+  }, [visibleTabs, defaultTab]);
 
   const image = useImage(isValidFormat ? uri : undefined);
   const [activeTab, setActiveTab] = useState<
     "crop" | "filter" | "adjust" | "draw" | "edit"
-  >(defaultTab);
+  >(initialTab);
 
   useEffect(() => {
     if (!visibleTabs.includes(activeTab as any) && activeTab !== "edit") {
-      setActiveTab(defaultTab);
+      setActiveTab(initialTab);
     }
-  }, [visibleTabs, defaultTab]);
+  }, [visibleTabs, initialTab]);
 
   // Centralized State Manager (Source of Truth)
   const stateManager = useMemo(() => {
@@ -130,7 +137,7 @@ export const PhotoEditor = ({
       setIsSaving(true);
       setTimeout(() => {
         try {
-          const result = stateManager.generateFinalImage(exportFormat, exportQuality);
+          const result = stateManager.generateFinalImage(exportFormat, exportQuality, exportMaxSize);
           if (result && onSave) {
             onSave(result);
           }

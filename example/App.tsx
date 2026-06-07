@@ -9,7 +9,11 @@ import {
   ScrollView,
   Switch,
 } from "react-native";
-import { PhotoEditor } from "react-native-photo-editor-pro";
+import { PhotoEditor, FilterConfig, HapticTickType } from "react-native-photo-editor-pro";
+import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
+import * as Haptics from "expo-haptics";
+import { ZoomPanModal } from "./ZoomPanModal";
 
 // Define our list of test images (supported and unsupported)
 const TEST_IMAGES = [
@@ -55,7 +59,7 @@ const DEEP_BLUE_MATRIX = [
   0,   0,   0,   1, 0,
 ];
 
-const CUSTOM_DREAMY_FILTERS = [
+const CUSTOM_DREAMY_FILTERS: FilterConfig[] = [
   {
     id: "retro_sepia",
     name: "Retro Sepia",
@@ -124,6 +128,52 @@ export default function App() {
   const [selectedImage, setSelectedImage] = useState<string | number>(
     TEST_IMAGES[0].uri
   );
+  const [galleryImage, setGalleryImage] = useState<string | null>(null);
+  const [zoomImageUri, setZoomImageUri] = useState<string | number | null>(null);
+
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        alert("Permission to access gallery is required!");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        let uri = result.assets[0].uri;
+
+        // Convert HEIC/HEIF images to JPEG
+        const cleanUri = uri.split("?")[0].toLowerCase();
+        if (cleanUri.endsWith(".heic") || cleanUri.endsWith(".heif")) {
+          try {
+            console.log("HEIC/HEIF image detected. Converting to JPEG...");
+            const manipResult = await ImageManipulator.manipulateAsync(
+              uri,
+              [],
+              { format: ImageManipulator.SaveFormat.JPEG }
+            );
+            uri = manipResult.uri;
+            console.log("Conversion complete:", uri);
+          } catch (manipError) {
+            console.error("Error converting HEIC to JPEG:", manipError);
+            alert("Failed to process HEIC/HEIF image. Opening original instead.");
+          }
+        }
+
+        setGalleryImage(uri);
+        setSelectedImage(uri);
+      }
+    } catch (error) {
+      console.warn("Error picking image:", error);
+      alert("Failed to pick image from gallery");
+    }
+  };
 
   // Feature controls
   const [showAdjust, setShowAdjust] = useState(true);
@@ -132,8 +182,8 @@ export default function App() {
   const [showDraw,   setShowDraw]   = useState(true);
 
   // Format controls
-  const [format, setFormat] = useState<"png" | "jpeg" | "webp">("webp");
-  const [quality, setQuality] = useState(90);
+  const [format, setFormat] = useState<"png" | "jpeg" | "webp">("png");
+  const [quality, setQuality] = useState(100);
 
   // Custom filters configuration
   const [injectCustomFilters, setInjectCustomFilters] = useState(false);
@@ -145,6 +195,10 @@ export default function App() {
   // Stats
   const [savedFormat, setSavedFormat] = useState<string | null>(null);
   const [savedSize, setSavedSize] = useState<number | null>(null);
+  const [savedDimensions, setSavedDimensions] = useState<{ width: number; height: number } | null>(null);
+
+  // Resolution controls
+  const [maxSize, setMaxSize] = useState<number | undefined>(1280);
 
   // Vibration controls
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
@@ -159,6 +213,49 @@ export default function App() {
     if (showDraw) tabs.push("draw");
     return tabs;
   }, [showAdjust, showFilter, showCrop, showDraw]);
+
+  const handleHaptic = (type: HapticTickType) => {
+    if (!vibrationEnabled) return;
+    try {
+      if (vibrationType === "NONE") return;
+
+      if (vibrationType === "LIGHT") {
+        if (type === HapticTickType.MINOR) {
+          Haptics.selectionAsync().catch(() => {});
+        } else if (type === HapticTickType.MAJOR) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        }
+      } else if (vibrationType === "MEDIUM") {
+        if (type === HapticTickType.MINOR) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } else if (type === HapticTickType.MAJOR) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+        }
+      } else if (vibrationType === "HEAVY") {
+        if (type === HapticTickType.MINOR) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        } else if (type === HapticTickType.MAJOR) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+        } else {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        }
+      } else { // DEFAULT
+        if (type === HapticTickType.MINOR) {
+          Haptics.selectionAsync().catch(() => {});
+        } else if (type === HapticTickType.MAJOR) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn("Haptics error:", e);
+    }
+  };
 
   const handleOpenEditor = (uri: string | number) => {
     setSelectedImage(uri);
@@ -178,6 +275,16 @@ export default function App() {
     if (match && match[1]) {
       setSavedFormat(match[1].toUpperCase());
     }
+
+    Image.getSize(
+      uri,
+      (w, h) => {
+        setSavedDimensions({ width: w, height: h });
+      },
+      (err) => {
+        console.warn("Failed to get dimensions:", err);
+      }
+    );
   };
 
   const activeTheme = THEMES[activeThemeKey];
@@ -199,6 +306,8 @@ export default function App() {
             theme={activeThemeKey === "default" ? undefined : activeTheme}
             enableVibration={vibrationEnabled}
             vibrationType={vibrationType as any}
+            onTriggerHaptic={handleHaptic}
+            exportMaxSize={maxSize}
           />
         </View>
       ) : (
@@ -410,6 +519,35 @@ export default function App() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* Resolution Cap Selector */}
+            <Text style={[styles.label, { marginTop: 12 }]}>Max Resolution Cap</Text>
+            <View style={styles.btnRow}>
+              {([
+                { label: "Original", value: undefined },
+                { label: "1600px", value: 1600 },
+                { label: "1280px", value: 1280 },
+                { label: "800px", value: 800 },
+              ] as const).map((r) => (
+                <TouchableOpacity
+                  key={r.label}
+                  style={[
+                    styles.selectorBtn,
+                    maxSize === r.value ? { backgroundColor: activeTheme.primary, borderColor: activeTheme.primary } : null,
+                  ]}
+                  onPress={() => setMaxSize(r.value)}
+                >
+                  <Text
+                    style={[
+                      styles.btnText,
+                      maxSize === r.value ? { color: "#FFF" } : null,
+                    ]}
+                  >
+                    {r.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
 
           {/* Test Image Selector */}
@@ -448,6 +586,69 @@ export default function App() {
                 </TouchableOpacity>
               );
             })}
+
+            {galleryImage && (
+              <TouchableOpacity
+                style={[
+                  styles.imageRowBtn,
+                  selectedImage === galleryImage ? { borderColor: activeTheme.primary } : null,
+                ]}
+                onPress={() => setSelectedImage(galleryImage)}
+              >
+                <View style={styles.imageRowLeft}>
+                  <Text
+                    style={[
+                      styles.imageRowLabel,
+                      selectedImage === galleryImage ? { color: "#FFF" } : null,
+                    ]}
+                  >
+                    🖼️ Gallery Image
+                  </Text>
+                  <Text style={styles.imageRowDesc} numberOfLines={1}>
+                    {galleryImage}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.radioButton,
+                    selectedImage === galleryImage ? { borderColor: activeTheme.primary, backgroundColor: activeTheme.primary } : null,
+                  ]}
+                />
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.galleryBtn,
+                { borderColor: activeTheme.primary }
+              ]}
+              onPress={pickImage}
+            >
+              <Text style={[styles.galleryBtnText, { color: activeTheme.primary }]}>
+                📂 Choose from Gallery
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Selected Image Preview (Original) */}
+          <View style={[styles.previewCard, { backgroundColor: activeTheme.tabBarBackground }]}>
+            <Text style={[styles.cardTitle, { color: activeTheme.text }]}>
+              Selected Image Preview
+            </Text>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => setZoomImageUri(selectedImage)}
+              style={{ width: "100%", height: 250 }}
+            >
+              <Image
+                source={typeof selectedImage === "number" ? selectedImage : { uri: selectedImage }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
+              <View style={[styles.formatBadge, { backgroundColor: activeTheme.primary }]}>
+                <Text style={styles.formatBadgeText}>🔍 Tap to Zoom & Pan</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           {/* Result Preview */}
@@ -456,20 +657,29 @@ export default function App() {
               <Text style={[styles.cardTitle, { color: activeTheme.text }]}>
                 Edited Output Preview
               </Text>
-              <View style={{ width: "100%", height: 250 }}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setZoomImageUri(editedImage)}
+                style={{ width: "100%", height: 250 }}
+              >
                 <Image
                   source={{ uri: editedImage }}
                   style={styles.previewImage}
                   resizeMode="contain"
                 />
                 <View style={[styles.formatBadge, { backgroundColor: activeTheme.primary }]}>
-                  <Text style={styles.formatBadgeText}>{savedFormat}</Text>
+                  <Text style={styles.formatBadgeText}>{savedFormat} (🔍 Tap to Zoom)</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
               <View style={styles.statsContainer}>
                 <Text style={styles.statsText}>
                   Format: <Text style={styles.boldText}>{savedFormat}</Text>
                 </Text>
+                {savedDimensions && (
+                  <Text style={styles.statsText}>
+                    Resolution: <Text style={styles.boldText}>{savedDimensions.width}x{savedDimensions.height}</Text>
+                  </Text>
+                )}
                 <Text style={styles.statsText}>
                   Approx Size: <Text style={styles.boldText}>{savedSize} KB</Text>
                 </Text>
@@ -480,6 +690,7 @@ export default function App() {
                   setEditedImage(null);
                   setSavedFormat(null);
                   setSavedSize(null);
+                  setSavedDimensions(null);
                 }}
               >
                 <Text style={styles.resetBtnText}>Clear Result</Text>
@@ -498,6 +709,11 @@ export default function App() {
           </View>
         </ScrollView>
       )}
+      <ZoomPanModal
+        visible={zoomImageUri !== null}
+        imageUri={zoomImageUri}
+        onClose={() => setZoomImageUri(null)}
+      />
     </View>
   );
 }
@@ -690,5 +906,20 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 0.5,
+  },
+  galleryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    marginTop: 8,
+    backgroundColor: "transparent",
+  },
+  galleryBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

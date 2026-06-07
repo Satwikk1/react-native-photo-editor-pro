@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import {
   Dimensions,
   FlatList,
@@ -25,6 +25,7 @@ import { RulerDial } from "./RulerDial";
 import { VibrationType, HapticTickType } from "../utils/vibration";
 import { addAlpha } from "../utils/convert";
 import type { EditorTheme } from "../theme/types";
+import { useZoomPan } from "../hooks/useZoomPan";
 import {
   blendMatrix,
   IDENTITY_MATRIX,
@@ -118,6 +119,11 @@ export const Filters = ({
   });
   const [activeCategory, setActiveCategory] = useState<FilterCategory | "all">("all");
 
+  const containerRef = useRef<View>(null);
+  const canvasOffsetRef = useRef({ x: 0, y: 0 });
+
+  const { panHandlers, zoomTransform } = useZoomPan(canvasLayout, canvasOffsetRef);
+
   // SharedValues — updated on the UI thread, never trigger React re-renders
   const intensitySV    = useSharedValue(stateManager.filterIntensity.value);
   const activeMatrixSV = useSharedValue<number[]>(activeFilter.matrix ?? IDENTITY_MATRIX);
@@ -146,6 +152,9 @@ export const Filters = ({
     const { width, height } = e.nativeEvent.layout;
     setCanvasLayout({ width, height });
     canvasHeightSV.value = height;
+    containerRef.current?.measure((x, y, w, h, px, py) => {
+      canvasOffsetRef.current = { x: px, y: py };
+    });
   };
 
   // ─── Derived values ─────────────────────────────────────────────────────
@@ -201,50 +210,60 @@ export const Filters = ({
     <View style={[styles.container, { backgroundColor: editorBg }]}>
 
       {/* Canvas — fills full container, never resizes */}
-      <View style={[styles.canvasContainer, { backgroundColor: editorBg }]} onLayout={onCanvasLayout}>
-        <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }}>
+      <View 
+        ref={containerRef}
+        style={[styles.canvasContainer, { backgroundColor: editorBg }]} 
+        onLayout={onCanvasLayout}
+        {...panHandlers}
+      >
+        <Canvas style={{ width: canvasLayout.width, height: canvasLayout.height }} pointerEvents="none">
           <Rect x={0} y={0} width={canvasLayout.width} height={canvasLayout.height} color={editorBg} />
-          {/* Outer: reactive Y position so image stays above the controls overlay */}
-          <Group transform={positionTransform}>
-            {/* Inner: rotation + flip pivot around the image centre */}
-            <Group
-              origin={{ x: drawWidth / 2, y: drawHeight / 2 }}
-              transform={orientationTransform}
-            >
-              <Image
-                image={image}
-                x={0}
-                y={0}
-                width={drawWidth}
-                height={drawHeight}
-                fit="contain"
+          
+          <Group
+            transform={zoomTransform}
+          >
+            {/* Outer: reactive Y position so image stays above the controls overlay */}
+            <Group transform={positionTransform}>
+              {/* Inner: rotation + flip pivot around the image centre */}
+              <Group
+                origin={{ x: drawWidth / 2, y: drawHeight / 2 }}
+                transform={orientationTransform}
               >
-                {!showOriginal && (
-                  activeFilter.effect
-                    ? <RuntimeShader source={activeFilter.effect} uniforms={shaderUniforms} />
-                    : <ColorMatrix matrix={blendedMatrix} />
-                )}
-                
-                {/* Markup Layer — Render normalized vector paths */}
-                <Group 
-                  transform={[
-                    { scaleX: drawWidth }, 
-                    { scaleY: drawHeight }
-                  ]}
+                <Image
+                  image={image}
+                  x={0}
+                  y={0}
+                  width={drawWidth}
+                  height={drawHeight}
+                  fit="contain"
                 >
-                  {!showOriginal && stateManager.paths.value.map((p, idx) => (
-                    <Path
-                      key={idx}
-                      path={p.path}
-                      style="stroke"
-                      strokeWidth={p.width / drawWidth}
-                      color={p.color}
-                      strokeCap="round"
-                      strokeJoin="round"
-                    />
-                  ))}
-                </Group>
-              </Image>
+                  {!showOriginal && (
+                    activeFilter.effect
+                      ? <RuntimeShader source={activeFilter.effect} uniforms={shaderUniforms} />
+                      : <ColorMatrix matrix={blendedMatrix} />
+                  )}
+                  
+                  {/* Markup Layer — Render normalized vector paths */}
+                  <Group 
+                    transform={[
+                      { scaleX: drawWidth }, 
+                      { scaleY: drawHeight }
+                    ]}
+                  >
+                    {!showOriginal && stateManager.paths.value.map((p, idx) => (
+                      <Path
+                        key={idx}
+                        path={p.path}
+                        style="stroke"
+                        strokeWidth={p.width / drawWidth}
+                        color={p.color}
+                        strokeCap="round"
+                        strokeJoin="round"
+                      />
+                    ))}
+                  </Group>
+                </Image>
+              </Group>
             </Group>
           </Group>
         </Canvas>

@@ -47,6 +47,7 @@ export interface PhotoEditorProps {
   theme?: EditorTheme;
   exportFormat?: 'png' | 'jpeg' | 'webp';
   exportQuality?: number;
+  exportMaxSize?: number;
   visibleTabs?: ('crop' | 'filter' | 'adjust' | 'draw')[];
   customFilters?: FilterConfig[];
   replaceDefaultFilters?: boolean;

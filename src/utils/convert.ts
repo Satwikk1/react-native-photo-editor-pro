@@ -73,8 +73,8 @@ export const isSupportedFormat = (uri: string | number): boolean => {
  */
 export const convertSkImage = (
   image: SkImage,
-  format: "png" | "jpeg" | "webp" = "webp",
-  quality: number = 90
+  format: "png" | "jpeg" | "webp" = "png",
+  quality: number = 100
 ): string | null => {
   try {
     let skiaFormat = ImageFormat.WEBP;

@@ -7,8 +7,8 @@ export const exportProcessedImage = async (
   filter: FilterType,
   cropRect?: { x: number; y: number; width: number; height: number },
   rotationAngle: number = 0,
-  format: 'png' | 'jpeg' | 'webp' = 'webp',
-  quality: number = 90
+  format: 'png' | 'jpeg' | 'webp' = 'png',
+  quality: number = 100
 ): Promise<string | null> => {
   try {
     const width = originalImage.width();

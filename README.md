@@ -30,6 +30,7 @@ Developers have always wanted to find a library that could **give users an in-ap
 
 ## ✨ Features
 *   🎨 **Pro-Grade Adjustments:** Real-time Exposure, Brilliance, Highlights, Shadows, Contrast, Brightness, Saturation, Warmth, and Vignette.
+*   🔍 **Pinch-to-Zoom & Panning:** Smooth double-finger pinch-to-zoom and pan gestures inside both the Adjustments and Filters tabs, featuring zero-jitter closed-form pivot math and 1:1 speed-matched panning.
 *   ⚡ **Auto-Enhance:** Instant intelligent pixel balancing and exposure tuning using offscreen histogram analysis.
 *   ✂️ **Smart Cropping:** Crop tool with standard aspect-ratio presets, rotations, horizontal/vertical flipping, and 3D tilts.
 *   ✍️ **Markup Board:** Zero-latency drawing canvas with pressure-responsive brushes and solid colors.
@@ -223,6 +224,43 @@ const MyEditor = () => {
       enableVibration={true}
       vibrationType={VibrationType.DEFAULT}
       onTriggerHaptic={handleHaptic}
+    />
+  );
+};
+```
+
+### 6. Recommended Lossless Export + Native Compression (Expo-Image-Manipulator)
+For high-resolution photos, encoding compressed JPEG/WEBP formats inside the JS thread can be memory-intensive. To achieve maximum quality, use hardware acceleration, and avoid out-of-memory crashes, we recommend saving the image from Skia as a lossless PNG at 100% quality, and then using `expo-image-manipulator` to handle the final compression and file conversion natively inside your app's `onSave` callback:
+
+```tsx
+import * as ImageManipulator from 'expo-image-manipulator';
+import { PhotoEditor } from 'react-native-photo-editor-pro';
+
+const MyEditorScreen = () => {
+  const handleSave = async (uri: string) => {
+    try {
+      // Compress and convert the lossless PNG output to a native compressed JPEG/WEBP
+      const manipResult = await ImageManipulator.manipulateAsync(
+        uri, // accepts file URI or base64 Data URI
+        [],  // no resizing or cropping needed
+        { 
+          compress: 0.85, 
+          format: ImageManipulator.SaveFormat.JPEG 
+        }
+      );
+      console.log('Final Compressed Image URI:', manipResult.uri);
+    } catch (error) {
+      console.error('Failed to compress image:', error);
+    }
+  };
+
+  return (
+    <PhotoEditor
+      uri={myImageUri}
+      exportFormat="png"     // Lossless PNG format
+      exportQuality={100}    // Maximum quality
+      onSave={handleSave}
+      onCancel={handleCancel}
     />
   );
 };
